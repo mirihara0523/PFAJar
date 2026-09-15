@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../node_modules/@fortawesome/fontawesome-free/css/all.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <link rel="stylesheet" href="../css/theme.css" />
+    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'  https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;">
+    <meta http-equiv="X-Content-Security-Policy" content="default-src 'self'; script-src 'self'  https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;">
+    <title>Mason Jar</title>
+  </head>
+  <body class="wizard-page">
+    <div id="parent" class="container h-100">
+      <div class="row align-items-center">
+        <div class="col">
+          <h1>Align Sections</h1>
+          <p>
+            <br>
+            Alignment takes your experimental tissue sections and helps align them to the Allen Brain Atlas. A predictor network will evaluate your tissue and suggest the best fitting sections.
+            Afterwards you will have to fine tune these predictions to best match your tissue.
+            <br>
+          </p>
+        </div>
+      </div>
+
+      <div id="alignSetupPanel">
+      <div class="row align-items-center m-1">
+        <div class="col d-grid justify-content-start">
+          <h5>
+            Input Path
+            <i class="fas fa-circle-question fa-fw fa-xs" data-bs-toggle="tooltip" data-bs-placement="right" title="Path to a folder with your ordered DAPI/Nissl tissue slices"></i>
+          </h5>
+        </div>
+        <div class="col d-grid">
+        </div>
+      </div>
+      <div class="row align-items-center m-1">
+        <div class="col d-grid">
+          <input type="url" id="indir" placeholder="Click to select directory or cancel to enter manually">
+        </div>
+      </div>
+      <div class="row align-items-center m-1">
+        <div class="col d-grid justify-content-start">
+          <h5>
+            Output Path
+            <i class="fas fa-circle-question fa-fw fa-xs" data-bs-toggle="tooltip" data-bs-placement="right" title="Path to where output should go"></i>
+          </h5>
+        </div>
+        <div class="col d-grid">
+        </div>
+      </div>
+      <div class="row align-items-center m-1">
+        <div class="col d-grid">
+          <input type="url" id="outdir" placeholder="Click to select directory or cancel to enter manually">
+        </div>
+      </div>
+      <div class="row align-items-center m-1">
+        <div class="col d-grid justify-content-start">
+          <h5>
+            Alignment Method
+            <i class="fas fa-circle-question fa-fw fa-xs" data-bs-toggle="tooltip" data-bs-placement="right" title="Automatic detects whole-brain vs left-hemisphere layout per section (recommended for mixed series). Force modes apply the same layout to every section."></i>
+          </h5>
+          <div class="dropdown text-start">
+            <button class="btn btn-info dropdown-toggle" type="button" id="methods" data-bs-toggle="dropdown" aria-expanded="false">
+            Automatic (recommended)
+            </button>
+            <ul class="dropdown-menu" aria-labelledby="regions">
+              <li><a class="dropdown-item" id="auto" href="#">Automatic (recommended)</a></li>
+              <li><a class="dropdown-item" id="whole" href="#">Both hemispheres (all sections)</a></li>
+              <li><a class="dropdown-item" id="half" href="#">Single hemisphere (all sections)</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="col d-grid justify-content-start">
+          <h5>
+            Legacy Atlas
+            <i class="fas fa-circle-question fa-fw fa-xs" data-bs-toggle="tooltip" data-bs-placement="right" title="Check this to use the 2014 atlas"></i>
+          </h5>
+            <input type="checkbox" id="legacy" />
+        </div>
+        <div class="col d-grid justify-content-start">
+          <!-- Spacing input, integer -->
+          <h5>
+            Spacing (Optional)
+            <i class="fas fa-circle-question fa-fw fa-xs" data-bs-toggle="tooltip" data-bs-placement="right" title="Spacing between slices in microns"></i>
+          </h5>
+          <input type="number" id="spacing" placeholder="Spacing in microns"
+            min="10" max="200" step="10"
+          >
+        </div>
+      </div>
+      <div id="runModePanel" class="row m-2 d-none workspace-block"></div>
+      <div
+        id="alignSessionRestoreBannerRow"
+        class="row align-items-center m-2 workspace-block d-none"
+      >
+        <div
+          id="alignSessionRestoreBanner"
+          class="col alert alert-secondary text-start"
+          role="status"
+        >
+          Resuming saved alignment tuning — alignment method restored from your last session.
+        </div>
+      </div>
+      <div class="row align-items-center m-1 workspace-block">
+        <div class="col form-check text-start">
+          <input class="form-check-input" type="checkbox" id="flatOutput" />
+          <label class="form-check-label" for="flatOutput">Write outputs directly to the output folder (legacy flat layout)</label>
+        </div>
+      </div>
+      <div
+        id="alignNapariBannerRow"
+        class="row align-items-center m-2 workspace-block d-none"
+      >
+        <div
+          id="alignNapariBanner"
+          class="col alert alert-info text-start"
+          role="status"
+        >
+          Atlas Alignment opened in Napari — switch to the
+          <strong>Atlas Alignment</strong> window. Mason Jar is minimized until
+          you click <strong>Finish</strong> in Napari (Mason Jar returns for warping
+          progress) or <strong>Cancel</strong> here.
+        </div>
+      </div>
+      <div class="row align-items-center m-4">
+        <div class="col d-grid gap-2">
+            <a role="button" class="btn btn-warning" id="back" href="./menu_category.html?cat=alignment">Back</a>
+        </div>
+        <div class="col d-grid">
+            <button type="button" class="btn btn-primary" id="run">Run</button>
+        </div>
+      </div>
+      </div>
+
+      <div id="alignWarpPanel" class="d-none workspace-block text-start mt-3">
+        <div class="alert alert-info" role="status">
+          Warping sections to the atlas — please wait. Do not start other tools until this finishes.
+        </div>
+        <div class="progress mb-2">
+          <div
+            id="alignWarpProgress"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            style="width: 0%"
+          ></div>
+        </div>
+        <p id="alignWarpMessage" class="small text-muted"></p>
+        <pre id="alignWarpLog" class="wizard-log small"></pre>
+      </div>
+
+      <div id="alignFinishPanel" class="d-none workspace-block text-start mt-3">
+        <div id="alignFinishAlert" class="alert alert-success" role="status">
+          Alignment finished.
+        </div>
+        <p id="alignFinishSummary" class="mb-3"></p>
+        <a class="btn btn-outline-primary" href="./detect_wizard.html">Cell Detection</a>
+        <a class="btn btn-outline-primary ms-2" href="./menu_category.html?cat=alignment">Alignment menu</a>
+        <a class="btn btn-outline-secondary ms-2" href="./workspace_menu.html">Workspace</a>
+      </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div class="modal" id="error" tabindex="-1" role="dialog" aria-labelledby="processing" data-bs-backdrop='static' aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+          <div class="modal-header text-center">
+            <p class="modal-title fw-bold fs-5 w-100" id="processingTitle">Error</p>
+          </div>
+          <div class="modal-body fa-3x">
+            <i class="fas fa-times"></i>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-danger" data-bs-dismiss="modal">Exit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="loadmessage text-left" id="loadmessage"></div>
+    <div class="loading" id="loadbar"></div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p" crossorigin="anonymous"></script>
+    <script src="../js/run.js" data-entry="align.js"></script>
+    </body>
+</html>

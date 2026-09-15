@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      rel="stylesheet"
+      href="../node_modules/@fortawesome/fontawesome-free/css/all.css"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'  https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <meta
+      http-equiv="X-Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'  https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Mason Jar</title>
+  </head>
+  <body>
+    <div id="parent" class="container h-100">
+      <div class="row align-items-center">
+        <div class="col">
+          <h1>DAPI cleanup</h1>
+          <p>
+            <br />
+            Polish DAPI preview images before atlas alignment: grayscale,
+            optional tissue isolation, uniform background, and contrast stretch.
+            Outputs <strong>PNG</strong> files (Align and Adjust expect PNG in
+            <code>00_dapi</code>, not TIFF).
+            <br />
+          </p>
+        </div>
+      </div>
+      <div class="row align-items-center m-1">
+        <div class="col d-grid justify-content-start">
+          <h5>
+            Input Path
+            <i
+              class="fas fa-circle-question fa-fw fa-xs"
+              data-bs-toggle="tooltip"
+              data-bs-placement="right"
+              title="Path to DAPI preview PNGs (typically 00_dapi)"
+            ></i>
+          </h5>
+        </div>
+      </div>
+      <div class="row align-items-center m-1">
+        <div class="col d-grid">
+          <input
+            type="url"
+            id="indir"
+            placeholder="Click to select directory or cancel to enter manually"
+          />
+        </div>
+      </div>
+      <div class="row align-items-center m-1 workspace-block text-start">
+        <div class="col">
+          <fieldset class="border rounded p-3">
+            <legend class="float-none w-auto px-2 fs-6">Output mode</legend>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="radio"
+                name="outputMode"
+                id="outputInPlace"
+                value="inplace"
+                checked
+              />
+              <label class="form-check-label" for="outputInPlace">
+                In place (recommended) — overwrite input; originals backed up to
+                <code>00_dapi_backup</code>
+              </label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="radio"
+                name="outputMode"
+                id="outputSeparate"
+                value="separate"
+              />
+              <label class="form-check-label" for="outputSeparate">
+                Separate folder — write PNGs to
+                <code>00_dapi_clean</code> (point Align input at the clean folder)
+              </label>
+            </div>
+          </fieldset>
+        </div>
+      </div>
+      <div class="row align-items-center m-1 d-none" id="outdirRow">
+        <div class="col d-grid justify-content-start">
+          <h5>
+            Output Path
+            <i
+              class="fas fa-circle-question fa-fw fa-xs"
+              data-bs-toggle="tooltip"
+              data-bs-placement="right"
+              title="Folder for cleaned DAPI images"
+            ></i>
+          </h5>
+        </div>
+      </div>
+      <div class="row align-items-center m-1 d-none" id="outdirInputRow">
+        <div class="col d-grid">
+          <input
+            type="url"
+            id="outdir"
+            placeholder="Click to select directory or cancel to enter manually"
+          />
+        </div>
+      </div>
+      <div class="row align-items-center m-1 mt-2 justify-content-start workspace-block text-start">
+        <div class="col-md-4">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="isolate" checked />
+            <label class="form-check-label" for="isolate">
+              Isolate tissue
+              <i
+                class="fas fa-circle-question fa-fw fa-xs"
+                data-bs-toggle="tooltip"
+                title="Otsu + largest connected component mask (no AI subject select)"
+              ></i>
+            </label>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="clahe" />
+            <label class="form-check-label" for="clahe">CLAHE</label>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="reBackup" />
+            <label class="form-check-label" for="reBackup">Re-backup originals</label>
+          </div>
+        </div>
+      </div>
+      <div class="row align-items-center m-1 workspace-block text-start">
+        <div class="col-md-6">
+          <label class="form-label" for="saturation">
+            Saturation clip (%)
+            <i
+              class="fas fa-circle-question fa-fw fa-xs"
+              data-bs-toggle="tooltip"
+              title="Percentile clip at low and high tails before stretch to uint8"
+            ></i>
+          </label>
+          <input type="number" class="form-control" id="saturation" value="5" min="0" max="49" step="0.5" />
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="bgValue">
+            Background level (optional)
+            <i
+              class="fas fa-circle-question fa-fw fa-xs"
+              data-bs-toggle="tooltip"
+              title="Fixed 0–255 fill outside tissue; leave blank for auto from border"
+            ></i>
+          </label>
+          <input type="number" class="form-control" id="bgValue" placeholder="Auto" min="0" max="255" step="1" />
+        </div>
+      </div>
+      <div id="runModePanel" class="row m-2 d-none workspace-block"></div>
+      <div class="row align-items-center m-4">
+        <div class="col d-grid gap-2">
+          <a role="button" class="btn btn-warning" id="back" href="./menu_category.html?cat=preprocess"
+            >Back</a
+          >
+        </div>
+        <div class="col d-grid">
+          <button type="button" class="btn btn-primary" id="run">Run</button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="modal"
+      id="error"
+      tabindex="-1"
+      role="dialog"
+      aria-labelledby="processing"
+      data-bs-backdrop="static"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+          <div class="modal-header text-center">
+            <p class="modal-title fw-bold fs-5 w-100" id="processingTitle">
+              Error
+            </p>
+          </div>
+          <div class="modal-body fa-3x">
+            <i class="fas fa-times"></i>
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-danger"
+              data-bs-dismiss="modal"
+            >
+              Exit
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="loadmessage text-left" id="loadmessage"></div>
+    <div class="loading" id="loadbar"></div>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="dapi_cleanup.js"></script>
+  </body>
+</html>

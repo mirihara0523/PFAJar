@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Project wizard — Mason Jar</title>
+  </head>
+  <body class="wizard-page">
+    <div id="parent" class="container py-4">
+      <h1>Project wizard</h1>
+      <p id="wizardIntro" class="text-muted">
+        Create or migrate a <code>.masonjar</code> project bundle. Legacy
+        <code>.belljar</code> projects still supported.
+      </p>
+
+      <ul class="nav nav-pills mb-3" id="wizardSteps">
+        <li class="nav-item"><span class="nav-link active" data-step="1">1. Location</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="2">2. Sources</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="3">3. Review</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="4">4. Import</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="5">5. Finish</span></li>
+      </ul>
+
+      <section id="step1" class="wizard-panel">
+        <div class="mb-3">
+          <label class="form-label" for="projectName">Project name</label>
+          <input type="text" class="form-control" id="projectName" placeholder="MyBrain" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="parentDir">Location to store all Mason Jar Projects</label>
+          <div class="input-group">
+            <input
+              type="text"
+              class="form-control"
+              id="parentDir"
+              placeholder="/path/to/projects"
+              readonly
+            />
+            <button type="button" class="btn btn-outline-primary" id="chooseBundle">
+              Choose folder
+            </button>
+          </div>
+          <p class="form-text">
+            Pick the location where all your Mason Jar projects live; the project folder is created inside it.
+          </p>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="bundlePath">Project folder (created for you)</label>
+          <input
+            type="text"
+            class="form-control"
+            id="bundlePath"
+            placeholder="/path/to/parent/M528_masonjar"
+            readonly
+          />
+          <p class="form-text">
+            For name <code>M528</code>, Mason Jar creates
+            <code>M528_masonjar/</code> with <code>M528.masonjar</code> and
+            <code>data/</code> inside. Legacy bundles with <code>project.masonjar</code> still
+            open normally.
+          </p>
+        </div>
+        <button type="button" class="btn btn-primary" id="step1Next">Next</button>
+      </section>
+
+      <section id="step2" class="wizard-panel d-none">
+        <p class="text-muted">
+          Map source folders. For legacy brains, scan an <code>M###</code> root first.
+        </p>
+        <div class="mb-3">
+          <button type="button" class="btn btn-outline-secondary" id="scanLegacy">
+            Scan legacy brain folder
+          </button>
+        </div>
+        <div id="sourceFields" class="row g-2"></div>
+        <div class="mt-3">
+          <button type="button" class="btn btn-outline-secondary" id="step2Back">Back</button>
+          <button type="button" class="btn btn-primary" id="step2Next">Next</button>
+        </div>
+      </section>
+
+      <section id="step3" class="wizard-panel workspace-block d-none">
+        <p class="text-muted">
+          Review how source files match across roles. Import still copies <strong>all</strong>
+          files; unmatched slices will not process together downstream.
+        </p>
+        <div class="wizard-review-layout">
+          <div class="wizard-review-scroll" id="wizard-review-scroll">
+            <p id="reviewStatus" class="small text-muted">Scanning sources…</p>
+            <div class="table-responsive mb-3">
+              <table class="table table-sm table-striped text-start" id="reviewTable">
+                <thead>
+                  <tr>
+                    <th>Slice ID</th>
+                    <th>DAPI</th>
+                    <th>Max</th>
+                    <th>Slices</th>
+                    <th>Quality</th>
+                  </tr>
+                </thead>
+                <tbody id="reviewTableBody"></tbody>
+              </table>
+            </div>
+            <div id="reviewOrphans" class="small text-muted mb-2"></div>
+          </div>
+          <div class="wizard-review-footer">
+            <div class="form-check text-start mb-3">
+              <input class="form-check-input" type="checkbox" id="reviewConfirm" />
+              <label class="form-check-label" for="reviewConfirm">
+                I understand unmatched files will not be processed together.
+              </label>
+            </div>
+            <div class="mt-3">
+              <button type="button" class="btn btn-outline-secondary" id="step3Back">Back</button>
+              <button type="button" class="btn btn-primary" id="step3Next" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step4" class="wizard-panel workspace-block d-none">
+        <div class="mb-3">
+          <label class="form-label">Import mode</label>
+          <div class="wizard-import-options">
+          <div class="form-check d-flex align-items-start gap-2 mb-2">
+            <input
+              class="form-check-input"
+              type="radio"
+              name="importMode"
+              id="modeCopy"
+              value="copy"
+              checked
+            />
+            <label class="form-check-label" for="modeCopy">
+              Copy into bundle (recommended, self-contained)
+            </label>
+          </div>
+          <div class="form-check d-flex align-items-start gap-2 mb-2">
+            <input
+              class="form-check-input"
+              type="radio"
+              name="importMode"
+              id="modeSymlink"
+              value="symlink"
+            />
+            <label class="form-check-label" for="modeSymlink">
+              Symlink (advanced — breaks if sources move or are deleted)
+            </label>
+          </div>
+          <div class="form-check d-flex align-items-start gap-2 mb-2">
+            <input
+              class="form-check-input"
+              type="radio"
+              name="importMode"
+              id="modeReference"
+              value="reference"
+            />
+            <label class="form-check-label" for="modeReference">
+              Reference only — keep absolute paths, no copy (phase 1)
+            </label>
+          </div>
+          </div>
+        </div>
+        <p id="importWarning" class="alert alert-warning d-none"></p>
+        <div class="mt-3">
+          <button type="button" class="btn btn-outline-secondary" id="step4Back">Back</button>
+          <button type="button" class="btn btn-primary" id="step4Next">Build project</button>
+        </div>
+      </section>
+
+      <section id="step5" class="wizard-panel workspace-block d-none">
+        <p id="finishStatus" class="text-muted">Working…</p>
+        <div class="progress mb-3">
+          <div
+            id="wizardProgress"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            role="progressbar"
+            style="width: 0%"
+            aria-valuenow="0"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          ></div>
+        </div>
+        <pre id="wizardLog" class="wizard-log small text-muted mb-3"></pre>
+        <a role="button" class="btn btn-primary d-none" id="openMenu" href="./menu.html"
+          >Open menu</a
+        >
+        <a role="button" class="btn btn-outline-primary d-none ms-2" id="openOrient" href="./orient.html"
+          >Orient slices</a
+        >
+      </section>
+
+      <div class="mt-4">
+        <a role="button" class="btn btn-warning" href="./menu.html">Cancel</a>
+      </div>
+    </div>
+    <script src="../js/run.js" data-entry="workspace.js,project.js,project_wizard.js"></script>
+  </body>
+</html>

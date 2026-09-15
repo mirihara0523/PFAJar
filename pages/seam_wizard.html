@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <style>
+      /* Seam-correction-only override: double the shared preview pane height
+         (theme.css .preprocess-preview-pane: min-height 20rem / max-height
+         28rem) so a full tile period (period ~99px, several seams) is easier
+         to inspect at once. Scoped to this page's ID -- does not touch the
+         shared class rule other preprocess wizards (Sharpen/Top-hat/BaSiC)
+         still use. Session-2, 2026-09-03. */
+      #preprocessPreviewViewport {
+        min-height: 40rem;
+        max-height: 56rem;
+      }
+    </style>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com; img-src 'self' file: data:;"
+    />
+    <title>Seam Correction — Mason Jar</title>
+  </head>
+  <body class="wizard-page">
+    <div class="container py-4 workspace-block text-start">
+      <h1>Seam Correction</h1>
+      <p class="text-muted">
+        Removes leftover vertical tile-stitching seams (periodic brightness steps) from a slide
+        image. Detection is automatic; only the averaging band around each seam is adjustable.
+        This is a separate step from BaSiC shading correction — BaSiC removes smooth
+        vignetting, this removes the discrete tile-boundary step BaSiC can't model.
+      </p>
+
+      <ul class="nav nav-pills mb-3" id="wizardSteps">
+        <li class="nav-item"><span class="nav-link active" data-step="1">1. Tune</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="2">2. Process</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="3">3. Done</span></li>
+      </ul>
+
+      <div id="runModePanel" class="d-none"></div>
+
+      <div id="step1">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div id="signalBranchRow" class="mb-2">
+              <label class="form-label" for="signalBranchSelect">Signal branch</label>
+              <select id="signalBranchSelect" class="form-select"></select>
+            </div>
+            <div id="sourceDatasetRow" class="mb-2">
+              <label class="form-label" for="sourceDatasetSelect">Source dataset</label>
+              <select id="sourceDatasetSelect" class="form-select"></select>
+              <p id="sourceDatasetHelp" class="small text-muted mb-0"></p>
+            </div>
+            <div id="seamExtraChannelsRow" class="mb-2 d-none">
+              <label class="form-label d-block">Also seam-correct these channels</label>
+              <div id="seamExtraChannelsList" class="mb-1"></div>
+              <p class="small text-muted mb-0">
+                DAPI is corrected by default. Check any additional signal branches to include
+                them in this same run -- each channel is corrected into its own output folder.
+              </p>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="sliceSelect">Preview slice</label>
+              <select id="sliceSelect" class="form-select"></select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="seamBand">Band (px)</label>
+              <input
+                type="number"
+                class="form-control"
+                id="seamBand"
+                value="4"
+                min="1"
+                max="32"
+                step="1"
+                data-preview-param
+              />
+              <p class="small text-muted mb-0">
+                Columns averaged on each side of a detected seam to estimate the brightness step.
+              </p>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="seamCorrectionMode">Correction mode</label>
+              <select id="seamCorrectionMode" class="form-select" data-preview-param>
+                <option value="auto" selected>Auto (Known-geometry preferred)</option>
+                <option value="known_geometry">Known-geometry</option>
+                <option value="grid_estimated">Grid-estimated</option>
+              </select>
+              <p id="seamCorrectionModeHelp" class="small text-muted mb-0">Auto uses Known-geometry when a seamgrid is available, otherwise Grid-estimated.</p>
+            </div>
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="checkbox" id="seamAutotune" data-preview-param checked />
+              <label class="form-check-label" for="seamAutotune">Auto-tune band</label>
+            </div>
+            <div class="mb-2">
+              <span id="seamAutotuneResult" class="form-text d-block">
+                Searches band values and keeps the one with the lowest residual seam signal (slower).
+              </span>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="displayMin">Display min (0–255)</label>
+              <input type="range" class="form-range" id="displayMin" min="0" max="255" value="0" />
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="displayMax">Display max (0–255)</label>
+              <input type="range" class="form-range" id="displayMax" min="0" max="255" value="255" />
+            </div>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="previewFilterBtn" />
+              <label class="form-check-label" for="previewFilterBtn">Preview correction</label>
+            </div>
+            <p class="small text-muted mb-2">
+              While checked, selecting a different slice automatically re-runs the preview.
+            </p>
+            <p id="seamModeResult" class="small mb-2"></p>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="autoRefreshAfterPan" />
+              <label class="form-check-label" for="autoRefreshAfterPan">
+                Auto-refresh filter after pan (5 s idle)
+              </label>
+            </div>
+            <button type="button" class="btn btn-primary" id="step1Next">Next — Process</button>
+          </div>
+          <div class="col-md-8">
+            <div
+              id="preprocessPreviewZoomWarning"
+              class="alert alert-warning d-none text-start mb-2"
+              role="alert"
+            ></div>
+            <div id="preprocessPreviewViewport" class="preprocess-preview-pane border rounded">
+              <div id="preprocessPreviewTransform" class="preprocess-preview-transform">
+                <img id="preprocessPreviewImg" alt="slice preview" draggable="false" />
+                <canvas id="preprocessPreviewOverlay" aria-hidden="true"></canvas>
+              </div>
+              <div
+                id="preprocessPreviewLoading"
+                class="preprocess-preview-loading d-none"
+                aria-live="polite"
+              >
+                <div class="preprocess-preview-loading-inner">
+                  <i class="fas fa-spinner fa-spin fa-2x"></i>
+                  <div class="progress mt-3" style="height: 8px">
+                    <div
+                      id="preprocessPreviewProgress"
+                      class="progress-bar progress-bar-striped progress-bar-animated"
+                      style="width: 0%"
+                    ></div>
+                  </div>
+                  <p id="preprocessPreviewProgressText" class="small mb-0 mt-2">0%</p>
+                </div>
+              </div>
+            </div>
+            <p id="preprocessPreviewStatus" class="small text-muted mt-2">
+              Pan/zoom the image, adjust display levels, then check Preview correction.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div id="step2" class="d-none">
+        <div class="progress mb-2">
+          <div
+            id="processProgress"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            style="width: 0%"
+          ></div>
+        </div>
+        <p id="processMessage" class="small text-muted"></p>
+        <pre id="wizardLog" class="wizard-log small"></pre>
+        <button type="button" class="btn btn-outline-secondary" id="step2Back">Back</button>
+        <button type="button" class="btn btn-danger d-none" id="step2Cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="processStart">Run seam correction</button>
+      </div>
+
+      <div id="finishPanel" class="d-none">
+        <div class="alert alert-success">Seam correction finished.</div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="setActiveMax" />
+          <label class="form-check-label" for="setActiveMax">
+            Set as active max task for this branch
+            <button
+              type="button"
+              class="btn btn-link btn-sm p-0 align-baseline ms-1 text-muted active-max-help-trigger"
+              id="setActiveMaxHelp"
+              aria-label="Help: active max task"
+            >
+              ?
+            </button>
+          </label>
+        </div>
+        <a class="btn btn-outline-primary" href="./detect_wizard.html">Cell Detection</a>
+        <a class="btn btn-outline-primary ms-2" href="./intensity.html">Isolate Regions</a>
+        <a class="btn btn-outline-secondary ms-2" href="./workspace_menu.html">Workspace</a>
+      </div>
+    </div>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="seam_wizard.js"></script>
+  </body>
+</html>

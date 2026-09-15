@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Batch — Mason Jar</title>
+    <style>
+      .batch-matrix-table th,
+      .batch-matrix-table td {
+        font-size: 0.85rem;
+        text-align: center;
+        vertical-align: middle;
+      }
+      .batch-matrix-table th.proj-col,
+      .batch-matrix-table td.proj-col {
+        text-align: left;
+        max-width: 16rem;
+        word-break: break-word;
+      }
+      .matrix-cell {
+        min-width: 4.5rem;
+        padding: 0.25rem 0.4rem;
+        border-radius: 0.3rem;
+      }
+      .matrix-cell.cell-green {
+        background: rgba(64, 160, 80, 0.18);
+      }
+      .matrix-cell.cell-amber {
+        background: rgba(245, 178, 73, 0.22);
+      }
+      .matrix-cell.cell-red {
+        background: rgba(214, 96, 80, 0.22);
+      }
+      .matrix-cell.cell-running {
+        background: rgba(80, 140, 220, 0.22);
+      }
+      .matrix-cell.cell-done {
+        background: rgba(64, 160, 80, 0.28);
+      }
+      .matrix-cell.cell-failed {
+        background: rgba(214, 96, 80, 0.32);
+        cursor: pointer;
+      }
+      .matrix-cell.cell-skipped {
+        background: rgba(190, 190, 190, 0.32);
+      }
+      .matrix-cell.cell-pending {
+        background: rgba(190, 190, 190, 0.16);
+      }
+      .matrix-cell .cell-elapsed {
+        display: block;
+        font-size: 0.7rem;
+        color: var(--mj-muted, #666);
+      }
+      .step-list .form-check {
+        text-align: left;
+      }
+      .step-list .step-meta-desc {
+        font-size: 0.75rem;
+        color: var(--mj-muted, #666);
+        margin-left: 1.5rem;
+      }
+      .project-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.25rem 0;
+      }
+      .project-row .proj-path {
+        font-size: 0.75rem;
+        color: var(--mj-muted, #666);
+        word-break: break-word;
+      }
+      .region-dual-list {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 0.5rem;
+        align-items: stretch;
+      }
+      .region-list-panel {
+        border: 1px solid var(--mj-border, #ccc);
+        border-radius: 0.375rem;
+        background: var(--mj-surface, #fff);
+        min-height: 12rem;
+        max-height: 16rem;
+        overflow-y: auto;
+        text-align: left;
+      }
+      .region-picker-row {
+        padding: 0.3rem 0.5rem;
+        cursor: pointer;
+        border-left: 4px solid transparent;
+      }
+      .region-picker-row.selected-row {
+        background: color-mix(in srgb, var(--mj-accent) 18%, var(--mj-surface, #fff));
+      }
+      .region-swatch {
+        display: inline-block;
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 2px;
+        margin-right: 0.35rem;
+        vertical-align: middle;
+      }
+      .wizard-log {
+        max-height: 22rem;
+        min-height: 8rem;
+        overflow: auto;
+        background: var(--mj-surface-2, #f7f5ee);
+        border: 1px solid var(--mj-border, #ccc);
+        border-radius: 0.375rem;
+        padding: 0.5rem;
+        text-align: left;
+        font-family: var(--bs-font-monospace, monospace);
+      }
+      .step-tail-pre {
+        max-height: 14rem;
+        overflow: auto;
+        background: var(--mj-surface-2, #f7f5ee);
+        padding: 0.4rem;
+        border-radius: 0.3rem;
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body class="wizard-page">
+    <div id="parent" class="container py-4 workspace-block text-start">
+      <p class="text-muted mb-1"><a href="./menu.html">Menu</a> / Batch</p>
+      <h1>Batch processing</h1>
+      <p class="text-muted">
+        Run pipeline steps across multiple Mason Jar projects with one click. The
+        wizard verifies inputs before launch, captures full Python output, and
+        keeps each project's <code>active_runs</code> in sync.
+      </p>
+
+      <ul class="nav nav-pills mb-3" id="wizardSteps">
+        <li class="nav-item">
+          <span class="nav-link active" data-step="1">1. Setup</span>
+        </li>
+        <li class="nav-item">
+          <span class="nav-link disabled" data-step="2">2. Run</span>
+        </li>
+        <li class="nav-item">
+          <span class="nav-link disabled" data-step="3">3. Summary</span>
+        </li>
+      </ul>
+
+      <section id="step1" class="wizard-panel">
+        <div class="row">
+          <div class="col-lg-6 mb-3">
+            <h2 class="h5">Projects</h2>
+            <div id="projectList" class="batch-project-list mb-2"></div>
+            <div class="d-flex flex-wrap gap-2 mb-2">
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-primary"
+                id="addProject"
+              >
+                Add project bundle…
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="scanFolder"
+              >
+                Scan folder for bundles
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                id="clearProjects"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div class="col-lg-6 mb-3">
+            <h2 class="h5">Tools</h2>
+            <div id="stepList" class="step-list"></div>
+            <p class="small text-muted mt-2 mb-0">
+              Align Sections and Viewer/Editor still run manually per brain.
+              Failed steps automatically skip their downstream steps for that
+              project; other projects continue independently.
+            </p>
+          </div>
+        </div>
+
+        <h2 class="h5 mt-2">Parameters</h2>
+        <div id="paramSections" class="accordion mb-3"></div>
+
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="saveDefaults" />
+          <label class="form-check-label" for="saveDefaults"
+            >Save as default for future batches</label
+          >
+        </div>
+
+        <div id="preflightWarnings" class="alert alert-warning d-none small"></div>
+        <h2 class="h6 mt-3">Preflight</h2>
+        <div id="preflightMatrix" class="table-responsive mb-3"></div>
+
+        <div class="d-flex justify-content-between">
+          <a class="btn btn-warning" href="./menu.html">Cancel</a>
+          <button type="button" class="btn btn-primary" id="startBatch" disabled>
+            Start batch →
+          </button>
+        </div>
+      </section>
+
+      <section id="step2" class="wizard-panel d-none">
+        <div id="batchStatusBlock" class="mb-2">
+          <p class="mb-1">
+            <strong>Project:</strong>
+            <span id="currentProject">—</span>
+            &nbsp;|&nbsp;<strong>Step:</strong>
+            <span id="currentStep">—</span>
+            &nbsp;|&nbsp;<strong>Elapsed:</strong>
+            <span id="elapsedClock">0:00:00</span>
+          </p>
+        </div>
+        <div class="progress mb-2" style="height: 1.4rem">
+          <div
+            id="loadbar"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            role="progressbar"
+            style="width: 0%"
+            aria-valuenow="0"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          ></div>
+        </div>
+        <p id="loadmessage" class="loadmessage small text-muted mb-2"></p>
+
+        <div id="runMatrix" class="table-responsive mb-2"></div>
+
+        <h2 class="h6 mt-3">Python output</h2>
+        <pre id="batchLog" class="wizard-log small text-muted mb-3"></pre>
+
+        <div class="d-flex justify-content-end">
+          <button
+            type="button"
+            class="btn btn-danger"
+            id="cancelBatch"
+          >
+            Cancel batch
+          </button>
+        </div>
+      </section>
+
+      <section id="step3" class="wizard-panel d-none">
+        <div id="summaryAlert" class="alert alert-success text-start"></div>
+        <div class="mb-3">
+          <strong>Total elapsed:</strong> <span id="totalElapsed">—</span>
+        </div>
+        <h2 class="h6">Per-project results</h2>
+        <div id="batchSummaryTable" class="table-responsive mb-3"></div>
+        <h2 class="h6">Active run snapshots</h2>
+        <div id="activeRunsBlock" class="small mb-3"></div>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-outline-secondary" id="openLogBtn">
+            Open Application log
+          </button>
+          <button type="button" class="btn btn-outline-primary" id="rerunBtn">
+            Run another batch
+          </button>
+          <a class="btn btn-primary" href="./menu.html" id="batchDone">Done</a>
+        </div>
+      </section>
+    </div>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="batch_wizard.js"></script>
+  </body>
+</html>

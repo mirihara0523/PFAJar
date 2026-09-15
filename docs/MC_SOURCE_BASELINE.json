@@ -1,0 +1,67 @@
+{
+  "source": "D:/Claude/masonjar-7.0.2/masonjar-7.0.2",
+  "build": "D:/Claude/masonjar-win32-x64-7.0.2/masonjar-7.0.2-MC.1-win32-x64/resources/app",
+  "createdAt": "2026-09-09T21:21:58.617Z",
+  "changes": [
+    {
+      "file": "js\\basic_wizard.js",
+      "action": "updated",
+      "sourceSha256": "3f59d8feda5c9db64f8d98f375b4bc3805d1f3489cfda4e1f464d567e98f8dfc",
+      "buildSha256": "9edc2c0f6462e4528d561dfca7114b3ee646ef5865865c993e9863881a2b1fd4"
+    },
+    {
+      "file": "js\\menu_category.js",
+      "action": "updated",
+      "sourceSha256": "def1dca22ba009459070237fec7a9c731fb26de9250f6f3ea1912b76a51a0d9c",
+      "buildSha256": "243503453d5bc32889a0719e046a78933c390ce9d196c38775ed276b6d5bd2e5"
+    },
+    {
+      "file": "js\\pipeline_runs.js",
+      "action": "updated",
+      "sourceSha256": "6c910bf1bf5a0a07b3e237f90298d339efe465d2e828bf71247690cc75efd003",
+      "buildSha256": "c5b403ad67d2054f9567227dd20c28cf4d957e79dc3e3cf4175c546d0901d38f"
+    },
+    {
+      "file": "js\\preprocess_wizard.js",
+      "action": "updated",
+      "sourceSha256": "a4b8e7db4bc928184c48513c5f51ecae843b398883490aafa02e968e87903488",
+      "buildSha256": "9b48c3fdd419ccb54e512107931f5fc46826c581d28bfb8fc0f3fd1cc209a8a3"
+    },
+    {
+      "file": "js\\seam_wizard.js",
+      "action": "added",
+      "sourceSha256": null,
+      "buildSha256": "4d0404ff8906531414ec9ff41c9e386919395a01cb1d2679990ee57a760c00ca"
+    },
+    {
+      "file": "main.js",
+      "action": "updated",
+      "sourceSha256": "6fc41827ea92f99e4ab0e072d30a01c6a9c2041a8b1030aa7cb3dac6f20c6cd7",
+      "buildSha256": "31aab3347a5ed2bf5b41c7337f808531f2fea845627790603fb9380d21b4b8aa"
+    },
+    {
+      "file": "pages\\seam_wizard.html",
+      "action": "added",
+      "sourceSha256": null,
+      "buildSha256": "cfcb4ebff7b022470c758f625dd6f1a1dd879dc4665d916811aae57ffece9572"
+    },
+    {
+      "file": "py\\adjust.py",
+      "action": "updated",
+      "sourceSha256": "4016dc380617701677a733e9cf473402f08bce037e5f1b3d156555826d07c878",
+      "buildSha256": "66788efb52705f72222720ed057b6ee2062d864ce451c7b44f69fd8029cc9859"
+    },
+    {
+      "file": "py\\czi_extract.py",
+      "action": "updated",
+      "sourceSha256": "52f3f03c0ea4c3e0bec4398375ebe0ede6cfd473083d488ac6c4965dc4a937d3",
+      "buildSha256": "83e14652ff85a7b003257001eddfc118bb9abe285c7b69b0a2b9b7cdf1f97338"
+    },
+    {
+      "file": "py\\seam_correct.py",
+      "action": "added",
+      "sourceSha256": null,
+      "buildSha256": "8a11fb5cea916963fb5e1c31f2b272568bebf192cef1b4684a684a92a230ee72"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+# Bell Jar — Python dependencies for a local conda env (e.g. `conda activate belljar`)
+#
+#   pip install -r requirements.txt
+#
+# Covers legacy scripts under py/ (same stack the Electron app installs into ~/.belljar/benv)
+# and the modern package under python/ (brainglobe-atlasapi, pydantic, etc.).
+#
+# Python: 3.10–3.12 matches python/pyproject.toml and avoids surprises. On 3.13+, NumPy 1.x has no
+# binary wheels, so we allow NumPy 2 there; otherwise pip tries to build NumPy 1.26 from source.
+#
+# PyTorch: CUDA 11.8 wheels. For CPU-only, remove the --extra-index-url line and install
+# torch/torchvision from PyPI.
+
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+brainglobe-atlasapi>=2.0
+imagecodecs
+matplotlib
+napari
+numpy>=1.26.0,<2.0.0; python_version < "3.13"
+numpy>=2.0.0; python_version >= "3.13"
+opencv-python
+Pillow
+pydantic>=2.0
+pynrrd
+pyqt6
+pytorch-msssim
+pytest>=7.0
+pytest-cov
+pyright
+ruff
+scikit-image
+scikit-learn
+scipy
+segment-anything-py
+SimpleITK
+sahi>=0.11.0
+tifffile
+timm
+torch
+torchvision
+ultralytics
+wandb
+
+# Editable install of the modern package (from repo root):
+#   pip install hatchling
+#   pip install -e ./python

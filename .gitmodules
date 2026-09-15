@@ -1,0 +1,3 @@
+[submodule "vendor/rsat"]
+	path = vendor/rsat
+	url = https://github.com/asoronow/rsat.git

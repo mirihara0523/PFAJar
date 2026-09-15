@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      rel="stylesheet"
+      href="../node_modules/@fortawesome/fontawesome-free/css/all.css"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Network settings — Mason Jar</title>
+  </head>
+  <body class="menu-page">
+    <div id="parent" class="container menu-shell">
+      <nav id="navTrail" class="nav-trail-wrap text-muted small mb-2" aria-label="Breadcrumb"></nav>
+      <header class="menu-hero text-center mb-3">
+        <h1 class="h3 menu-hero-title">Network</h1>
+        <p class="menu-hero-subtitle">
+          Bandwidth fair-share on shared compute servers and NAS path configuration.
+        </p>
+      </header>
+
+      <section
+        id="ioFairsharePanel"
+        class="mb-4 workspace-block text-start"
+        aria-label="Network sharing"
+      >
+        <h2 class="h6 text-muted mb-2">Your settings</h2>
+        <p class="small text-muted mb-2">
+          On shared compute servers, Mason Jar splits NAS bandwidth fairly across active
+          pipeline jobs on this machine.
+        </p>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="ioFairshareEnabled" checked />
+          <label class="form-check-label" for="ioFairshareEnabled">
+            Enable adaptive bandwidth fair-share
+          </label>
+        </div>
+        <div class="row g-2 align-items-end mb-3">
+          <div class="col-sm-4">
+            <label class="form-label small mb-0" for="ioFairshareLinkMode">Link speed</label>
+            <select class="form-select form-select-sm" id="ioFairshareLinkMode">
+              <option value="auto" selected>Auto-detect</option>
+              <option value="manual">Manual (Mbps)</option>
+            </select>
+          </div>
+          <div class="col-sm-4 d-none" id="ioFairshareManualWrap">
+            <label class="form-label small mb-0" for="ioFairshareLinkMbps">Mbps</label>
+            <input
+              type="number"
+              class="form-control form-control-sm"
+              id="ioFairshareLinkMbps"
+              min="10"
+              step="10"
+              value="1000"
+            />
+          </div>
+          <div class="col-sm-4">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="ioFairshareSaveLink">
+              Save link speed
+            </button>
+          </div>
+        </div>
+        <p class="small mb-0" id="ioFairshareStatus">Checking network share status…</p>
+
+        <h2 class="h6 text-muted mb-2 mt-4">Server network locations</h2>
+        <p class="small text-muted mb-2">
+          Machine-wide settings in shared <code>config.json</code>. Once configured on this
+          server, every user sees the same list below.
+        </p>
+        <div id="ioFairshareNasConfigured" class="alert alert-info small d-none" role="status">
+          Network locations are configured for this server.
+        </div>
+        <p id="ioFairshareNasEmpty" class="small text-muted mb-2">
+          No network locations configured yet. An admin or first user should add mapped drives
+          or UNC shares.
+        </p>
+        <ul id="ioFairshareNasList" class="small mb-2"></ul>
+        <button type="button" class="btn btn-sm btn-outline-primary mb-2" id="ioFairsharePickNas">
+          Select network drives…
+        </button>
+        <p id="ioFairshareNasFeedback" class="small mb-0 d-none"></p>
+      </section>
+
+      <section class="mb-3">
+        <a class="btn btn-outline-secondary me-2" href="./settings.html">Settings</a>
+        <a class="btn btn-outline-secondary" href="./menu.html">Start</a>
+      </section>
+    </div>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="settings_network.js"></script>
+  </body>
+</html>

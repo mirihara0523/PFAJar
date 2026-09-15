@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      rel="stylesheet"
+      href="../node_modules/@fortawesome/fontawesome-free/css/all.css"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Updates — Mason Jar</title>
+  </head>
+  <body class="menu-page">
+    <div id="parent" class="container menu-shell">
+      <nav id="navTrail" class="nav-trail-wrap text-muted small mb-2" aria-label="Breadcrumb"></nav>
+      <header class="menu-hero text-center mb-3">
+        <h1 class="h3 menu-hero-title">Updates</h1>
+        <p class="menu-hero-subtitle">
+          Check for new Mason Jar releases and install updates on Windows.
+        </p>
+      </header>
+
+      <div id="updateTestBanner" class="alert alert-info d-none text-start mb-3" role="status"></div>
+      <div
+        id="mandatoryUpdateBanner"
+        class="alert alert-warning text-start mb-3 d-none"
+        role="alert"
+      >
+        Required update — downloading…
+      </div>
+
+      <section
+        id="updateStatusPanel"
+        class="mb-4 workspace-block text-start"
+        aria-label="Update status"
+      >
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <span class="text-muted small">Installed:</span>
+          <strong id="currentVersionLabel">—</strong>
+          <span class="text-muted small ms-2">Latest:</span>
+          <strong id="latestVersionLabel">—</strong>
+          <span id="prereleaseBadge" class="badge bg-warning text-dark d-none">Pre-release</span>
+        </div>
+        <p id="updateSummaryLine" class="small text-muted mb-2">Checking for updates…</p>
+        <p class="small text-muted mb-3">
+          Update repository:
+          <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="openUpdateRepositoryBtn">
+            https://github.com/mirihara0523-hue/masonjar
+          </button>
+          <br />
+          Last checked: <span id="lastUpdateCheckedAt">—</span>
+        </p>
+        <div id="releaseNotesBlock" class="small mb-3 d-none">
+          <h2 class="h6 text-muted">What's new</h2>
+          <p id="releaseNotesText" class="mb-0 text-secondary"></p>
+        </div>
+
+        <div class="progress mb-2 d-none" id="updateProgressWrap" style="height: 1.25rem">
+          <div
+            id="updateProgressBar"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            role="progressbar"
+            style="width: 0%"
+            aria-valuenow="0"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          ></div>
+        </div>
+        <p id="updateProgressStatus" class="small text-muted mb-3 d-none"></p>
+
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <button type="button" class="btn btn-outline-primary" id="checkAgainBtn">
+            Check this repository
+          </button>
+          <button type="button" class="btn btn-primary d-none" id="updateNowBtn">
+            Update Now
+          </button>
+          <button type="button" class="btn btn-primary d-none" id="macDownloadBtn">
+            Download for macOS
+          </button>
+          <button type="button" class="btn btn-outline-secondary d-none" id="openReleaseBtn">
+            Open release page
+          </button>
+        </div>
+        <p id="updateFeedback" class="small mb-0"></p>
+      </section>
+
+      <section
+        id="updateAdvancedPanel"
+        class="mb-4 workspace-block text-start"
+        aria-label="Advanced update settings"
+      >
+        <h2 class="h6 text-muted mb-2">Advanced</h2>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="checkUpdatesOnStartup" disabled />
+          <label class="form-check-label" for="checkUpdatesOnStartup">
+            Automatic update checks are disabled in this custom build
+          </label>
+        </div>
+        <p class="small text-muted mb-3">
+          Mason Jar does not contact GitHub at startup and never requires an
+          update automatically. Use “Check again” to check this build's GitHub
+          releases manually.
+        </p>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="allowPrerelease" />
+          <label class="form-check-label" for="allowPrerelease">
+            Allow pre-release versions
+          </label>
+        </div>
+        <p class="small text-muted mb-3">
+          When enabled, Mason Jar may offer beta builds marked pre-release on GitHub.
+          Stable releases are still preferred when they are newer.
+        </p>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="keepVersionBackups" />
+          <label class="form-check-label" for="keepVersionBackups">
+            Keep version backups
+          </label>
+        </div>
+        <p class="small text-muted mb-2">
+          When enabled, Update Now copies the whole install folder next to itself
+          (name ends with <code>.backup-&lt;oldVersion&gt;</code>) before replacing files.
+          Off by default — backups use a lot of disk.
+        </p>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="deleteVersionBackupsBtn">
+            Delete old version backups
+          </button>
+          <span id="versionBackupsStatus" class="small text-muted">—</span>
+        </div>
+      </section>
+
+      <section
+        class="mb-4 workspace-block text-start small text-muted"
+        aria-label="Update limitations"
+      >
+        <h2 class="h6 text-muted">Notes</h2>
+        <ul class="mb-0 ps-3">
+          <li>On Windows, use <strong>Update Now</strong> to download and install in one step. macOS users can download the DMG from GitHub.</li>
+          <li>Mason Jar must restart to finish installing. Finish or cancel long Python jobs first. Close other copies of Mason Jar first.</li>
+          <li>You can keep the app in any folder name (including Explorer’s versioned unzip folder). Updates replace files in place.</li>
+          <li>Installs on read-only or network paths may fail — use <strong>Open release page</strong> and install manually if needed.</li>
+          <li>Pre-releases and version backups are off by default.</li>
+        </ul>
+        <p class="mt-2 mb-0">
+          <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="openUpdateLogBtn">
+            Open update log
+          </button>
+        </p>
+      </section>
+
+      <section class="mb-3" id="updateFooterNav">
+        <a class="btn btn-outline-secondary me-2" href="./settings.html">Settings</a>
+        <a class="btn btn-outline-secondary" href="./menu.html">Start</a>
+      </section>
+    </div>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="settings_updates.js"></script>
+  </body>
+</html>

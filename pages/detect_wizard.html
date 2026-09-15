@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link
+      rel="stylesheet"
+      href="../node_modules/@fortawesome/fontawesome-free/css/all.css"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com; img-src 'self' file: data:;"
+    />
+    <title>Cell Detection — Mason Jar</title>
+  </head>
+  <body class="wizard-page">
+    <div id="parent" class="container py-4 workspace-block text-start">
+      <h1>Cell Detection</h1>
+      <p class="text-muted">
+        Finds cells in filtered tissue using tiled object detection. After each run, review QC
+        charts and suggested parameter tuning on the summary step.
+      </p>
+
+      <ul class="nav nav-pills mb-3" id="wizardSteps">
+        <li class="nav-item"><span class="nav-link active" data-step="1">1. Cell Detection</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="2">2. Process</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="3">3. Summary</span></li>
+      </ul>
+
+      <div id="step1">
+        <div
+          id="detectScoutBanner"
+          class="alert alert-info text-start d-none mb-3"
+          role="status"
+        ></div>
+
+        <div
+          id="detectDatasetSection"
+          class="mb-3 d-none"
+        >
+          <h5 class="mb-2">Intensity dataset</h5>
+          <div class="row g-2">
+            <div class="col-md-4">
+              <label class="form-label small" for="detectSignalBranch">Signal branch</label>
+              <select id="detectSignalBranch" class="form-select form-select-sm"></select>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small" for="detectMaxDataset">Dataset</label>
+              <select id="detectMaxDataset" class="form-select form-select-sm"></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="indir">Input path</label>
+          <input
+            type="url"
+            class="form-control"
+            id="indir"
+            placeholder="Max projection or processed TIFF folder"
+          />
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="outdir">Output path</label>
+          <input
+            type="url"
+            class="form-control"
+            id="outdir"
+            placeholder="Predictions output folder"
+          />
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Detection model</label>
+          <div class="dropdown">
+            <button
+              class="btn btn-info dropdown-toggle"
+              type="button"
+              id="methods"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+            >
+              Somata
+            </button>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" id="somata" href="#">Somata</a></li>
+              <li><a class="dropdown-item" id="nuclei" href="#">Nuclei</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="mb-2">
+          <a
+            id="advance"
+            data-bs-toggle="collapse"
+            href="#collapseAdvanced"
+            role="button"
+            aria-expanded="false"
+            aria-controls="collapseAdvanced"
+          >
+            Advanced settings
+            <i class="fa-solid fa-angle-up fa-fw rotate down" id="arrow"></i>
+          </a>
+        </div>
+        <div class="collapse mb-3" id="collapseAdvanced">
+          <div class="row g-2">
+            <div class="col-md-4 col-lg-2">
+              <label class="form-label small" for="tile">Tile size</label>
+              <input type="text" class="form-control form-control-sm" id="tile" placeholder="640" />
+            </div>
+            <div class="col-md-4 col-lg-2">
+              <label class="form-label small" for="confidence">Confidence</label>
+              <input type="text" class="form-control form-control-sm" id="confidence" placeholder="0.5" />
+            </div>
+            <div class="col-md-4 col-lg-2">
+              <label class="form-label small" for="area">Area cutoff</label>
+              <input type="text" class="form-control form-control-sm" id="area" placeholder="200" />
+            </div>
+            <div class="col-md-4 col-lg-2">
+              <label class="form-label small" for="eccentricity">Eccentricity</label>
+              <input type="text" class="form-control form-control-sm" id="eccentricity" placeholder="0.2" />
+            </div>
+            <div class="col-md-4 col-lg-2">
+              <label class="form-label small" for="intensityMin">Intensity cutoff</label>
+              <input
+                type="text"
+                class="form-control form-control-sm"
+                id="intensityMin"
+                placeholder="0 = disabled"
+              />
+            </div>
+            <div class="col-md-8 col-lg-4">
+              <label class="form-label small" for="model">Custom model</label>
+              <input type="text" class="form-control form-control-sm" id="model" placeholder="Optional .pt path" />
+            </div>
+            <div class="col-md-4 col-lg-2 d-flex align-items-end">
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="multichannel" />
+                <label class="form-check-label small" for="multichannel">Multichannel</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="runModePanel" class="mb-3 d-none"></div>
+
+        <div class="mb-3">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="flatOutput" />
+            <label class="form-check-label" for="flatOutput"
+              >Write outputs directly to the output folder (legacy flat layout)</label
+            >
+          </div>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="perSliceQc" />
+            <label class="form-check-label" for="perSliceQc"
+              >Enable additional per-slice QC plots</label
+            >
+          </div>
+        </div>
+
+        <a class="btn btn-outline-secondary" id="step1Back" href="./menu_category.html?cat=detection"
+          >Back</a
+        >
+        <button type="button" class="btn btn-primary ms-2" id="step1Next">Next — Process</button>
+      </div>
+
+      <div id="step2" class="d-none">
+        <p id="processMessage" class="text-muted">Running cell detection…</p>
+        <div class="progress mb-3" style="height: 1.25rem">
+          <div
+            id="processProgress"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            role="progressbar"
+            style="width: 0%"
+            aria-valuenow="0"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          ></div>
+        </div>
+        <pre id="wizardLog" class="wizard-log small text-muted mb-3"></pre>
+        <button type="button" class="btn btn-outline-danger" id="step2Cancel">Cancel</button>
+      </div>
+
+      <div id="step3" class="d-none">
+        <div id="summaryAlert" class="alert text-start"></div>
+        <div id="qcGallery" class="detect-qc-gallery mb-3"></div>
+        <div id="qcAnalysisSummary" class="text-start mb-3"></div>
+        <button type="button" class="btn btn-outline-primary mb-3 d-none" id="applyIntensityCutoff">
+          Use suggested intensity cutoff
+        </button>
+        <p id="rerunFooter" class="small text-muted mb-3">
+          Re-running cell detection with the suggested intensity cutoff may reduce dim false
+          positives.
+        </p>
+        <a class="btn btn-primary" id="backToTools" href="./workspace_menu.html">Back to workspace</a>
+        <a class="btn btn-outline-primary ms-2" href="./count.html">Count Brain</a>
+      </div>
+    </div>
+
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="detect_wizard.js"></script>
+  </body>
+</html>

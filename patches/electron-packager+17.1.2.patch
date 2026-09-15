@@ -1,0 +1,16 @@
+diff --git a/node_modules/electron-packager/src/win32.js b/node_modules/electron-packager/src/win32.js
+index 9416617..708ce57 100644
+--- a/node_modules/electron-packager/src/win32.js
++++ b/node_modules/electron-packager/src/win32.js
+@@ -73,6 +73,11 @@ class WindowsApp extends App {
+   }
+ 
+   needsRcedit () {
++    // Building win32 from macOS/Linux skips rcedit (otherwise Wine is required for icon /
++    // version metadata). Build on a Windows host or install Wine for full EXE metadata.
++    if (process.platform !== 'win32' && this.opts.platform === 'win32') {
++      return false
++    }
+     return this.opts.icon || this.opts.win32metadata || this.opts.appCopyright || this.opts.appVersion || this.opts.buildVersion
+   }
+ 

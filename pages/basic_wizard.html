@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com; img-src 'self' file: data:;"
+    />
+    <title>BaSiCPy Shading Correction — Mason Jar</title>
+  </head>
+  <body class="wizard-page">
+    <div class="container py-4 workspace-block text-start">
+      <h1>BaSiCPy Shading Correction</h1>
+
+      <ul class="nav nav-pills mb-3" id="wizardSteps">
+        <li class="nav-item"><span class="nav-link active" data-step="0">0. Attribution</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="1">1. Tune</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="2">2. Process</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="3">3. Done</span></li>
+      </ul>
+
+      <div id="step0">
+        <div class="alert alert-light border text-start">
+          <p>
+            This tool corrects uneven illumination (shading) in microscopy images using
+            <strong>BaSiCPy</strong>, the MIT-licensed Python package. Mason Jar does
+            <strong>not</strong> run MATLAB BaSiC.
+          </p>
+          <p class="mb-1"><strong>Algorithm / citation</strong></p>
+          <p class="small">
+            Peng, T. et al. A BaSiC Tool for Background and Shading Correction of Optical
+            Microscopy Images. <em>Nature Communications</em> 8, 14836 (2017).
+            doi:10.1038/ncomms14836
+          </p>
+          <p class="mb-1"><strong>Software</strong></p>
+          <p class="small">
+            BaSiCPy (peng-lab) — MIT License. Copyright 2022 BaSiCPy developing collaboration group.
+            Permission is hereby granted, free of charge, to any person obtaining a copy of this
+            software and associated documentation files (the “Software”), to deal in the Software
+            without restriction, including without limitation the rights to use, copy, modify, merge,
+            publish, distribute, sublicense, and/or sell copies of the Software, subject to including
+            the copyright notice and permission notice in all copies or substantial portions.
+          </p>
+          <p class="small text-muted mb-0">
+            Repository: https://github.com/peng-lab/BaSiCPy — PyPI package <code>basicpy</code>.
+            Correction is fit and applied <strong>independently per channel</strong>.
+          </p>
+        </div>
+        <a class="btn btn-outline-secondary" href="./menu_category.html?cat=preprocess" id="attrBack"
+          >Back</a
+        >
+        <button type="button" class="btn btn-primary" id="attrProceed">Proceed</button>
+      </div>
+
+      <div id="step1" class="d-none">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="mb-2">
+              <label class="form-label" for="channelSelect">Channel</label>
+              <select id="channelSelect" class="form-select"></select>
+              <p class="small text-muted mb-0">
+                Tune each channel separately — shading is not shared across channels.
+              </p>
+            </div>
+            <div id="signalBranchRow" class="mb-2 d-none">
+              <label class="form-label" for="signalBranchSelect">Signal branch</label>
+              <select id="signalBranchSelect" class="form-select"></select>
+            </div>
+            <div id="sourceDatasetRow" class="mb-2 d-none">
+              <label class="form-label" for="sourceDatasetSelect">Source dataset</label>
+              <select id="sourceDatasetSelect" class="form-select"></select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="sliceSelect">Preview slice</label>
+              <select id="sliceSelect" class="form-select"></select>
+            </div>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="getDarkfield" checked />
+              <label class="form-check-label" for="getDarkfield">Estimate darkfield</label>
+            </div>
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="checkbox" id="autoTune" />
+              <label class="form-check-label" for="autoTune">Auto-tune smoothness</label>
+            </div>
+            <div class="mb-2">
+              <span id="autoTuneResult" class="form-text d-block">
+                BaSiC picks flatfield/darkfield smoothness automatically (slower). Working size stays manual.
+              </span>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="smoothFlat">Flatfield smoothness</label>
+              <input type="number" class="form-control" id="smoothFlat" value="1" min="0.1" max="10" step="0.1" />
+              <div class="form-text">Range 0.1–10 · default 1 · higher = smoother flatfield</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="smoothDark">Darkfield smoothness</label>
+              <input type="number" class="form-control" id="smoothDark" value="1" min="0.1" max="10" step="0.1" />
+              <div class="form-text">Range 0.1–10 · default 1 · higher = smoother darkfield</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="workingSize">Working size (fit)</label>
+              <input type="number" class="form-control" id="workingSize" value="128" min="32" max="512" step="16" />
+              <div class="form-text">Range 32–512 px · default 128 · larger = finer fit, slower</div>
+            </div>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="sortIntensity" />
+              <label class="form-check-label" for="sortIntensity">Sort by intensity</label>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="displayMin">Display min</label>
+              <input type="range" class="form-range" id="displayMin" min="0" max="255" value="0" />
+            </div>
+            <div class="mb-2">
+              <label class="form-label" for="displayMax">Display max</label>
+              <input type="range" class="form-range" id="displayMax" min="0" max="255" value="255" />
+            </div>
+            <button type="button" class="btn btn-outline-primary mb-2" id="previewFilterBtn">
+              Preview correction
+            </button>
+            <p id="channelVisitHelp" class="small text-muted"></p>
+            <button type="button" class="btn btn-primary" id="step1Next">Next — Process</button>
+            <button type="button" class="btn btn-outline-secondary ms-2" id="step1BackAttr">
+              Back to attribution
+            </button>
+            <a class="btn btn-outline-secondary ms-2" href="./menu_category.html?cat=preprocess"
+              >Back to preprocessing</a
+            >
+            <a class="btn btn-outline-secondary ms-2" href="./workspace_menu.html">Cancel</a>
+          </div>
+          <div class="col-md-8">
+            <div
+              id="preprocessPreviewZoomWarning"
+              class="alert alert-warning d-none text-start mb-2"
+              role="alert"
+            ></div>
+            <div id="preprocessPreviewViewport" class="preprocess-preview-pane border rounded">
+              <div id="preprocessPreviewTransform" class="preprocess-preview-transform">
+                <img id="preprocessPreviewImg" alt="slice preview" draggable="false" />
+              </div>
+              <div
+                id="preprocessPreviewLoading"
+                class="preprocess-preview-loading d-none"
+                aria-live="polite"
+              >
+                <div class="preprocess-preview-loading-inner">
+                  <div class="progress mt-3" style="height: 8px">
+                    <div
+                      id="preprocessPreviewProgress"
+                      class="progress-bar progress-bar-striped progress-bar-animated"
+                      style="width: 0%"
+                    ></div>
+                  </div>
+                  <p id="preprocessPreviewProgressText" class="small mb-0 mt-2">0%</p>
+                </div>
+              </div>
+            </div>
+            <p id="preprocessPreviewStatus" class="small text-muted mt-2">
+              Select a channel, pan/zoom, then Preview correction.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div id="step2" class="d-none">
+        <div id="resumeBanner" class="alert alert-warning d-none text-start" role="alert"></div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="forceRefit" />
+          <label class="form-check-label" for="forceRefit">Force refit flat/dark profiles</label>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="startFresh" />
+          <label class="form-check-label" for="startFresh">Start fresh (ignore resume progress)</label>
+        </div>
+        <ul id="channelConfirmList" class="small"></ul>
+        <div class="progress mb-2">
+          <div
+            id="processProgress"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            style="width: 0%"
+          ></div>
+        </div>
+        <p id="processMessage" class="small text-muted"></p>
+        <pre id="wizardLog" class="wizard-log small"></pre>
+        <button type="button" class="btn btn-outline-secondary" id="step2Back">Back</button>
+        <button type="button" class="btn btn-danger d-none" id="step2Cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="processStart">Run shading correction</button>
+      </div>
+
+      <div id="finishPanel" class="d-none">
+        <div class="alert alert-success" id="finishSummary">Shading correction finished.</div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="setActiveMax" />
+          <label class="form-check-label" for="setActiveMax">
+            Set first signal BaSiC leaf as active max task
+          </label>
+        </div>
+        <a class="btn btn-outline-primary" href="./detect_wizard.html">Cell Detection</a>
+        <a class="btn btn-outline-secondary ms-2" href="./workspace_menu.html">Workspace</a>
+        <a class="btn btn-outline-secondary ms-2" href="./menu_category.html?cat=preprocess"
+          >Image preprocessing</a
+        >
+      </div>
+    </div>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="basic_wizard.js"></script>
+  </body>
+</html>

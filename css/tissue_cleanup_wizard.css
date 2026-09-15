@@ -1,0 +1,265 @@
+#tissueCanvasViewport {
+  position: relative;
+  width: 100%;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--mj-border, #ccc);
+  border-radius: 0.375rem;
+  background: #1a1a1a;
+  cursor: default;
+  position: relative;
+}
+
+.tissue-workspace-grid {
+  --tissue-left-pane: 50%;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, var(--tissue-left-pane)) minmax(0, 1fr);
+  align-items: stretch;
+  min-height: min(70vh, 640px);
+}
+.tissue-image-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem;
+  border: 1px solid var(--mj-border, #ccc);
+  border-radius: 0.375rem;
+  background: var(--mj-panel, rgba(255, 255, 255, 0.03));
+}
+.tissue-menu-pane {
+  --tissue-standard-control-width: 12rem;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.75rem;
+  border: 1px solid var(--mj-border, #ccc);
+  border-radius: 0.375rem;
+  background: var(--mj-panel, rgba(255, 255, 255, 0.03));
+}
+.tissue-pane-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tissue-left-pane) - 5px);
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+  z-index: 10;
+}
+.tissue-pane-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  background: var(--mj-border, #6c757d);
+  border-radius: 999px;
+  opacity: 0.8;
+}
+.tissue-pane-divider:hover::before,
+.tissue-pane-divider:focus-visible::before,
+.tissue-pane-divider.is-dragging::before {
+  background: var(--mj-accent, #c9a227);
+  opacity: 1;
+}
+.tissue-menu-pane .tool-bar {
+  flex-direction: column;
+  flex-wrap: nowrap !important;
+  align-items: flex-start;
+  margin: 0 !important;
+}
+.tissue-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  width: 100%;
+}
+.tissue-control-row > .btn,
+.tissue-control-row > .btn-group {
+  flex: 0 0 auto;
+}
+.tissue-control-row > .mj-scrub {
+  margin-left: 0 !important;
+  flex: 0 0 var(--tissue-standard-control-width);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+  justify-content: flex-end;
+}
+.tissue-history-row .btn-group {
+  flex: 0 0 auto;
+  display: flex;
+  width: var(--tissue-standard-control-width);
+}
+.tissue-history-row .btn-group > .btn {
+  flex: 1 1 50%;
+}
+.tissue-history-row .tissue-trace-action {
+  margin-left: 0;
+  width: var(--tissue-standard-control-width);
+}
+.tissue-slice-nav {
+  display: flex;
+  width: var(--tissue-standard-control-width);
+}
+.tissue-slice-nav > .btn {
+  flex: 1 1 50%;
+}
+.tissue-menu-pane .mj-scrub-input {
+  width: 100%;
+  min-height: calc(1.5em + 0.75rem + 2px);
+  border-color: var(--mj-border, #6c757d);
+  border-radius: 0.375rem;
+}
+.tissue-menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.tissue-menu-actions > .btn {
+  flex: 0 0 auto;
+}
+/* Keep the desktop app in two columns even in a narrow window. */
+@media (max-width: 479.98px) {
+  .tissue-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tissue-pane-divider {
+    display: none;
+  }
+  .tissue-menu-pane {
+    max-height: none;
+    overflow: visible;
+  }
+}
+#tissueCanvasViewport.erase-mode {
+  cursor: crosshair;
+}
+#tissueCanvasViewport.keep-mode {
+  cursor: crosshair;
+}
+#tissueCanvasViewport.trace-mode {
+  cursor: crosshair;
+}
+#tissueCanvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.tool-bar .btn.active {
+  box-shadow: inset 0 0 0 2px var(--mj-accent, #c9a227);
+}
+.tissue-brush-cursor {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.8);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.tissue-brush-cursor.erase-cursor {
+  border-color: rgba(220, 53, 69, 0.95);
+  background: rgba(220, 53, 69, 0.14);
+}
+.tissue-brush-cursor.keep-cursor {
+  border-color: rgba(25, 135, 84, 0.95);
+  background: rgba(25, 135, 84, 0.14);
+}
+.mj-scrub {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.mj-scrub-label {
+  cursor: default;
+  user-select: none;
+  font-size: 0.85rem;
+  color: var(--mj-muted, #6c757d);
+  white-space: normal;
+}
+.mj-scrub-input {
+  width: 4.5rem;
+}
+.mj-scrub-range {
+  font-size: 0.75rem;
+  color: var(--mj-muted, #9aa0a6);
+  white-space: nowrap;
+}
+.confirm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 0.5rem;
+}
+.confirm-tile {
+  border: 1px solid var(--mj-border, #ccc);
+  border-radius: 0.375rem;
+  padding: 0.25rem;
+  text-align: center;
+  cursor: pointer;
+  background: #111;
+}
+.confirm-tile img,
+.confirm-tile .confirm-noimg {
+  width: 100%;
+  height: 72px;
+  object-fit: contain;
+  background: #000;
+  display: block;
+  border-radius: 0.25rem;
+}
+.confirm-tile .confirm-noimg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 0.7rem;
+}
+.confirm-tile .confirm-id {
+  font-size: 0.7rem;
+  color: var(--mj-muted, #adb5bd);
+  margin-top: 0.15rem;
+  word-break: break-all;
+  line-height: 1.1;
+}
+.confirm-tile .confirm-method {
+  font-size: 0.7rem;
+  color: var(--mj-muted, #adb5bd);
+  margin-top: 0.15rem;
+  line-height: 1.1;
+}
+.confirm-tile .confirm-badge {
+  font-size: 0.65rem;
+  display: inline-block;
+  margin-top: 0.1rem;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+}
+.confirm-tile.will-apply {
+  border-color: #2e7d32;
+}
+.confirm-tile.will-apply .confirm-badge {
+  background: #2e7d32;
+  color: #fff;
+}
+.confirm-tile.unchanged .confirm-badge {
+  background: #444;
+  color: #ddd;
+}
+.confirm-tile.no-preview {
+  border-color: #b71c1c;
+}
+.confirm-tile.no-preview .confirm-badge {
+  background: #b71c1c;
+  color: #fff;
+}

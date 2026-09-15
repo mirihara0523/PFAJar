@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="../css/style.css" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Parcellation — Mason Jar</title>
+    <style>
+      .region-dual-list {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 0.75rem;
+        align-items: stretch;
+      }
+      .region-list-panel {
+        border: 1px solid var(--mj-border, #ccc);
+        border-radius: 0.375rem;
+        background: var(--mj-surface, #fff);
+        min-height: 12rem;
+        max-height: 16rem;
+        overflow-y: auto;
+        text-align: left;
+      }
+      .region-picker-row {
+        padding: 0.35rem 0.5rem;
+        cursor: pointer;
+        border-left: 4px solid transparent;
+      }
+      .region-picker-row.selected-row {
+        background: color-mix(in srgb, var(--mj-accent) 18%, var(--mj-surface, #fff));
+      }
+      .region-swatch {
+        display: inline-block;
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 2px;
+        margin-right: 0.35rem;
+        vertical-align: middle;
+      }
+      .slice-table {
+        max-height: 16rem;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body class="wizard-page">
+    <div id="parent" class="container py-4 workspace-block text-start">
+      <h1>Parcellation (bulk)</h1>
+      <p class="text-muted">
+        Roll annotation borders to a coarser CCF tier on selected sections in the active align run.
+        Manual Viewer/Editor brush edits on those sections are reverted from backup.
+      </p>
+
+      <ul class="nav nav-pills mb-3" id="wizardSteps">
+        <li class="nav-item"><span class="nav-link active" data-step="1">1. Sections</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="2">2. Target</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="3">3. Review</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="4">4. Run</span></li>
+        <li class="nav-item"><span class="nav-link disabled" data-step="5">5. Summary</span></li>
+      </ul>
+
+      <section id="step1" class="wizard-panel">
+        <p id="projectInfo" class="small text-muted"></p>
+        <p id="slicesLeafInfo" class="small"></p>
+        <div class="slice-table border rounded mb-3">
+          <table class="table table-sm table-striped mb-0">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="selectAllSlices" checked /></th>
+                <th>Slice</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="sliceTableBody"></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-primary" id="step1Next">Next</button>
+        <a class="btn btn-outline-secondary" href="./workspace_menu.html">Cancel</a>
+      </section>
+
+      <section id="step2" class="wizard-panel d-none">
+        <div class="row g-2 mb-2">
+          <div class="col-md-4">
+            <label class="form-label" for="tierSelect">Hierarchy</label>
+            <select id="tierSelect" class="form-select form-select-sm"></select>
+            <select id="levelSelect" class="form-select form-select-sm d-none" aria-label="CCFv3 raw depth"></select>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label" for="regionSearch">Search available</label>
+            <input type="search" class="form-control form-control-sm" id="regionSearch" placeholder="acronym or name" />
+          </div>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="ccfAdvancedToggle" />
+          <label class="form-check-label" for="ccfAdvancedToggle">Advanced — show CCFv3 raw depths</label>
+        </div>
+        <div class="region-dual-list mb-3">
+          <div>
+            <div class="small fw-bold mb-1">Available regions</div>
+            <div id="availableList" class="region-list-panel"></div>
+          </div>
+          <div class="d-flex flex-column justify-content-center gap-2">
+            <button type="button" class="btn btn-sm btn-primary" id="addInclude">Add →</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="removeInclude">← Remove</button>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="addAllInclude">Add all</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" id="removeAllInclude">Remove all</button>
+          </div>
+          <div>
+            <div class="small fw-bold mb-1">Included regions</div>
+            <div id="includedList" class="region-list-panel"></div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline-secondary" id="step2Back">Back</button>
+        <button type="button" class="btn btn-primary" id="step2Next">Next</button>
+      </section>
+
+      <section id="step3" class="wizard-panel d-none">
+        <div class="alert alert-warning small">
+          Applying parcellation reverts manual Adjust brush edits on every selected section.
+          Unchecked sections are not changed.
+        </div>
+        <dl class="row small mb-3">
+          <dt class="col-sm-3">Target</dt>
+          <dd class="col-sm-9" id="reviewTarget"></dd>
+          <dt class="col-sm-3">Sections</dt>
+          <dd class="col-sm-9" id="reviewSlices"></dd>
+          <dt class="col-sm-3">Included</dt>
+          <dd class="col-sm-9" id="reviewIncluded"></dd>
+        </dl>
+        <button type="button" class="btn btn-outline-secondary" id="step3Back">Back</button>
+        <button type="button" class="btn btn-primary" id="step3Start">Start</button>
+      </section>
+
+      <section id="step4" class="wizard-panel d-none">
+        <p id="runStatus" class="text-muted">Applying parcellation…</p>
+        <div class="progress mb-3">
+          <div
+            id="runProgress"
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            role="progressbar"
+            style="width: 0%"
+            aria-valuenow="0"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          ></div>
+        </div>
+        <pre id="runLog" class="wizard-log small text-muted mb-3"></pre>
+        <button type="button" class="btn btn-outline-danger" id="cancelRun">Cancel</button>
+      </section>
+
+      <section id="step5" class="wizard-panel d-none">
+        <div id="summaryAlert" class="alert alert-success text-start"></div>
+        <a class="btn btn-primary" href="./adjust.html" id="openAdjust">Open Viewer/Editor</a>
+        <a class="btn btn-outline-secondary" href="./workspace_menu.html">Back to workspace</a>
+      </section>
+    </div>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p"
+      crossorigin="anonymous"
+    ></script>
+    <script src="../js/run.js" data-entry="parcellation_wizard.js"></script>
+  </body>
+</html>
