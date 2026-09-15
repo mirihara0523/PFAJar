@@ -1,6 +1,6 @@
 # Mason Jar
 
-이 폴더는 **7.0.2-MC.1 수정본 전용 소스**입니다. 원본 소스와 원본 실행본은 별도로 보존합니다. 경로, 복원 내역과 검증 방법은 [수정본 소스 안내](docs/MC_SOURCE_SETUP.md)를 확인하세요.
+This folder contains the source code dedicated to the 7.0.2-MC.1 modified version. The original source code and the original executable are preserved separately. For information on paths, restoration history, and verification methods, please refer to [the Modified Source Setup Guide](docs/MC_SOURCE_SETUP.md).
 
 ![Licence](https://img.shields.io/github/license/Ileriayo/markdown-badges?style=for-the-badge) ![Electron.js](https://img.shields.io/badge/Electron-191970?style=for-the-badge&logo=Electron&logoColor=white) ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white) ![Mac OS](https://img.shields.io/badge/mac%20os-000000?style=for-the-badge&logo=macos&logoColor=F0F0F0) ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
 
