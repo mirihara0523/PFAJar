@@ -18,8 +18,8 @@ PFA Jar is a fork of [Mason Jar](https://github.com/matsojr22/masonjar) for neur
 
 # Install from Release
 
-Download the most recent release for your OS from [mirihara0523-hue/PFAJar release](https://github.com/mirihara-hue/pfajar/releases).
+Download the most recent release from [mirihara0523/PFAJar release](https://github.com/mirihara-hue/pfajar/releases).
 
 # Attribution
 
-PFA Jar is maintained by [mirihara-hue](https://github.com/mirihara-hue). It is derived from Mason Jar by Matt Jacobs (and Alec Soronow) at the Euiseok Kim Lab, used under the MIT License. See `pages/credits.html` for full attribution.
+PFA Jar is maintained by [mirihara](https://github.com/mirihara-hue). It is derived from Mason Jar by Matt Jacobs (and Alec Soronow) at the Euiseok Kim Lab, used under the MIT License. See `pages/credits.html` for full attribution.
