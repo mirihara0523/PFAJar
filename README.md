@@ -1,6 +1,6 @@
 # PFA Jar
 
-This folder contains the source code dedicated to the PFA Jar, modified version of Mason Jar. The original source code and the original executable are preserved separately. For information on paths, restoration history, and verification methods, please refer to [the Modified Source Setup Guide](docs/MC_SOURCE_SETUP.md).
+This folder contains the source code dedicated to the PFA Jar, a modified version of Mason Jar. The original source code and the original executable are preserved separately. For information on paths, restoration history, and verification methods, please refer to [the Modified Source Setup Guide](docs/MC_SOURCE_SETUP.md).
 
 ![Licence](https://img.shields.io/github/license/Ileriayo/markdown-badges?style=for-the-badge) ![Electron.js](https://img.shields.io/badge/Electron-191970?style=for-the-badge&logo=Electron&logoColor=white) ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white) ![Mac OS](https://img.shields.io/badge/mac%20os-000000?style=for-the-badge&logo=macos&logoColor=F0F0F0) ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
 
