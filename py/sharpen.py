@@ -1,4 +1,4 @@
-"""Sharpen / equalize pipeline for Mason Jar (unsharp + optional CLAHE + white tophat)."""
+"""Sharpen / equalize pipeline for PFA Jar (unsharp + optional CLAHE + white tophat)."""
 
 from __future__ import annotations
 

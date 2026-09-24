@@ -1,4 +1,4 @@
-"""Machine-wide adaptive NAS/SMB I/O fair-share for Mason Jar pipeline jobs."""
+"""Machine-wide adaptive NAS/SMB I/O fair-share for PFA Jar pipeline jobs."""
 
 from __future__ import annotations
 
@@ -39,9 +39,9 @@ def default_coordinator_dir() -> Path:
         return Path(override)
     if sys.platform == "win32":
         program_data = os.environ.get("ProgramData", r"C:\ProgramData")
-        return Path(program_data) / "MasonJar" / "io-fairshare"
+        return Path(program_data) / "PFAJar" / "io-fairshare"
     if sys.platform == "darwin":
-        return Path("/Library/Application Support/MasonJar/io-fairshare")
+        return Path("/Library/Application Support/PFAJar/io-fairshare")
     return Path("/var/run/masonjar-io-fairshare")
 
 

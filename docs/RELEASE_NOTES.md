@@ -1,4 +1,4 @@
-# Mason Jar release notes (human-facing)
+# PFA Jar release notes (human-facing)
 
 Copy for GitHub releases and suggested git commits. **Newest version at the top.**
 
@@ -6,11 +6,11 @@ Do not put file paths, test names, or IPC implementation details here—keep rel
 
 ---
 
-## v7.0.2-MC.1
+## v1.0.0
 
 **What's new**
 
-- **Safe custom-build update policy:** Automatic and mandatory update checks are disabled. Manual checks use the Mason Jar custom-build repository, so this build cannot be replaced by an upstream release at startup.
+- **Safe custom-build update policy:** Automatic and mandatory update checks are disabled. Manual checks use the PFA Jar custom-build repository, so this build cannot be replaced by an upstream release at startup.
 - **More reliable CZI import:** Large Z-stacks use less peak memory, DAPI extraction handles single-plane inputs more safely, and filenames containing periods work throughout the import workflow.
 - **Improved Seam Correction:** Known-geometry correction is used when tile-grid data is available, with Grid-estimated correction as the fallback. Viewer previews run live and retain the selected correction state while you navigate.
 - **Faster, clearer Viewer/Editor interaction:** DAPI and annotations render as separate layers, brush editing and Undo are more responsive, pan is available with mouse gestures, and Annotation/DAPI panes can be resized.
@@ -18,7 +18,7 @@ Do not put file paths, test names, or IPC implementation details here—keep rel
 
 **Commit subject**
 
-Integrate 7.0.2-MC.1 import, seam, and viewer improvements
+PFA Jar 1.0.0: import, seam, and viewer improvements
 
 **Commit body**
 
@@ -72,7 +72,7 @@ Use getBundleRoot for discovery like other preprocess wizards, add Tune leave li
 
 **Credits**
 
-- Algorithm: Peng et al., Nat Commun 8:14836 (2017). Software: BaSiCPy (peng-lab), MIT License. Mason Jar does not run MATLAB BaSiC.
+- Algorithm: Peng et al., Nat Commun 8:14836 (2017). Software: BaSiCPy (peng-lab), MIT License. PFA Jar does not run MATLAB BaSiC.
 
 **Commit subject**
 
@@ -256,7 +256,7 @@ Version bump only so lab installs on fixed 6.0.26 can exercise Update Now end-to
 
 **What's new**
 
-- **Update Now completes and reopens:** After downloading a Windows update, Mason Jar closes, finishes installing in the background, and relaunches on the new version instead of leaving you stuck on the old build (which could trigger another required-update loop).
+- **Update Now completes and reopens:** After downloading a Windows update, PFA Jar closes, finishes installing in the background, and relaunches on the new version instead of leaving you stuck on the old build (which could trigger another required-update loop).
 - **Install check uses the real app version file:** Update Now verifies the version from Electron’s `resources/app` package file (and still accepts a root copy for compatibility), so a successful install is no longer treated as a failure when that file is not next to `masonjar.exe`.
 
 **Commit subject**
@@ -293,9 +293,9 @@ Align Batch with current main tools (path/branch parity, Top-hat, drop DAPI clea
 **What's new**
 
 - **Faster CZI probe:** Probing large multi-Z mosaic CZIs no longer scans every Z plane’s mosaic tiles up front. Probe stays quick for folder import; sparse-Z detection still runs correctly during extract.
-- **Fair-share project index:** Opening or refreshing a large project index now counts toward network fair-share, so another Mason Jar instance running a heavy pipeline job shares the NAS link instead of starving the index load.
+- **Fair-share project index:** Opening or refreshing a large project index now counts toward network fair-share, so another PFA Jar instance running a heavy pipeline job shares the NAS link instead of starving the index load.
 - **Align Finish confirmation:** Clicking Finish in Napari asks you to confirm before warping, with Cancel as the safe default.
-- **Align warp progress in Mason Jar:** After you confirm Finish, Mason Jar comes back to the front immediately and shows a live warping progress log. When warping completes, a Done panel summarizes results with next-step buttons (Detect, Alignment menu, Workspace).
+- **Align warp progress in PFA Jar:** After you confirm Finish, PFA Jar comes back to the front immediately and shows a live warping progress log. When warping completes, a Done panel summarizes results with next-step buttons (Detect, Alignment menu, Workspace).
 
 **Commit subject**
 
@@ -303,7 +303,7 @@ Speed up CZI probe, fair-share index loads, and Align Finish UX
 
 **Commit body**
 
-Make multi-Z mosaic CZI probe metadata-cheap again, register project index refresh under io fair-share, and after Napari Align Finish confirmation restore Mason Jar with a warp progress panel and Done summary.
+Make multi-Z mosaic CZI probe metadata-cheap again, register project index refresh under io fair-share, and after Napari Align Finish confirmation restore PFA Jar with a warp progress panel and Done summary.
 
 ---
 
@@ -311,7 +311,7 @@ Make multi-Z mosaic CZI probe metadata-cheap again, register project index refre
 
 **What's new**
 
-- **Loading project index:** When you open the workspace or a pipeline tool and Mason Jar is scanning the project’s files, a floating “Loading project index…” panel appears with a short spinning console of lighthearted status lines so the window no longer looks frozen. It clears once banners and tools are ready. Long-running job consoles (CZI extract, batch, Isolate Regions, and similar) are unchanged.
+- **Loading project index:** When you open the workspace or a pipeline tool and PFA Jar is scanning the project’s files, a floating “Loading project index…” panel appears with a short spinning console of lighthearted status lines so the window no longer looks frozen. It clears once banners and tools are ready. Long-running job consoles (CZI extract, batch, Isolate Regions, and similar) are unchanged.
 
 **Commit subject**
 
@@ -327,7 +327,7 @@ Opening the workspace or tool setup pages now shows a floating spinner with a fa
 
 **What's new**
 
-- **Update Now:** With only one Mason Jar window open, Update Now no longer asks you to close “other instances.” Previously the updater mistook Electron’s background helper processes for extra copies of the app, so the update could not start.
+- **Update Now:** With only one PFA Jar window open, Update Now no longer asks you to close “other instances.” Previously the updater mistook Electron’s background helper processes for extra copies of the app, so the update could not start.
 
 **Commit subject**
 
@@ -335,7 +335,7 @@ Fix Update Now false other-instance detection
 
 **Commit body**
 
-Count only Mason Jar main processes when checking peers before Update Now; ignore Electron helper processes that share masonjar.exe.
+Count only PFA Jar main processes when checking peers before Update Now; ignore Electron helper processes that share masonjar.exe.
 
 ---
 
@@ -343,17 +343,17 @@ Count only Mason Jar main processes when checking peers before Update Now; ignor
 
 **What's new**
 
-- **Multiple windows:** You can open more than one Mason Jar at a time again (useful on shared lab machines). Updating still asks you to close other copies from the same install folder before Update Now runs.
-- **Update wait screen:** If you open Mason Jar while an update is installing, you see the usual startup screen with “Installing update — please wait…” until it is safe to continue — not a quit dialog or a silent wait.
-- **CZI import probe:** When a Zeiss file uses a pixel type libCZI cannot sample-read, probe records a warning and skips further sample reads for that file so the rest of the folder can finish. If the shared Python worker dies mid-probe (rare), Mason Jar automatically retries that folder up to two more times so you usually do not need to click Re-probe.
+- **Multiple windows:** You can open more than one PFA Jar at a time again (useful on shared lab machines). Updating still asks you to close other copies from the same install folder before Update Now runs.
+- **Update wait screen:** If you open PFA Jar while an update is installing, you see the usual startup screen with “Installing update — please wait…” until it is safe to continue — not a quit dialog or a silent wait.
+- **CZI import probe:** When a Zeiss file uses a pixel type libCZI cannot sample-read, probe records a warning and skips further sample reads for that file so the rest of the folder can finish. If the shared Python worker dies mid-probe (rare), PFA Jar automatically retries that folder up to two more times so you usually do not need to click Re-probe.
 
 **Commit subject**
 
-Restore multi-instance Mason Jar and harden update wait UX
+Restore multi-instance PFA Jar and harden update wait UX
 
 **Commit body**
 
-Allow multiple Mason Jar windows again, keep update.lock only while apply runs, and show the normal loading splash while an update installs. Also soft-fail CZI probe sample reads after unsupported PixelType errors and auto-retry folder probe when the shared worker exits.
+Allow multiple PFA Jar windows again, keep update.lock only while apply runs, and show the normal loading splash while an update installs. Also soft-fail CZI probe sample reads after unsupported PixelType errors and auto-retry folder probe when the shared worker exits.
 
 ---
 
@@ -361,7 +361,7 @@ Allow multiple Mason Jar windows again, keep update.lock only while apply runs, 
 
 **What's new**
 
-- **Network fair-share:** Finished pipeline jobs no longer keep counting toward the shared NAS bandwidth limit after they complete. Previously a finished tool could leave a “ghost” job in the fair-share list until you fully quit Mason Jar, which made active work look more throttled than it should.
+- **Network fair-share:** Finished pipeline jobs no longer keep counting toward the shared NAS bandwidth limit after they complete. Previously a finished tool could leave a “ghost” job in the fair-share list until you fully quit PFA Jar, which made active work look more throttled than it should.
 
 **Commit subject**
 
@@ -377,8 +377,8 @@ The long-lived Python worker now tears down fair-share registration after each t
 
 **What's new**
 
-- **Windows Update Now restart:** Installing an update no longer asks “Quit Mason Jar?” in the middle of the install. Canceling that prompt could leave the updater waiting while the app stayed open, so Mason Jar did not reopen until you quit manually.
-- **Safer updates:** Only one Mason Jar window runs at a time. If another copy is open from the same install folder, Update Now asks you to close it first. A second launch while an update is installing is blocked. If Mason Jar is still running after the updater waits, the install aborts instead of replacing files in use.
+- **Windows Update Now restart:** Installing an update no longer asks “Quit PFA Jar?” in the middle of the install. Canceling that prompt could leave the updater waiting while the app stayed open, so PFA Jar did not reopen until you quit manually.
+- **Safer updates:** Only one PFA Jar window runs at a time. If another copy is open from the same install folder, Update Now asks you to close it first. A second launch while an update is installing is blocked. If PFA Jar is still running after the updater waits, the install aborts instead of replacing files in use.
 - **Version backups optional:** Updates no longer copy a full backup of the install folder by default. Settings → Updates has **Keep version backups** (off by default) and **Delete old version backups** to remove prior `….backup-<version>` folders.
 - Portable installs may live in any folder name (including Explorer’s versioned unzip folder such as `masonjar-win32-x64-6.0.16`); updates still replace files in place.
 
@@ -480,7 +480,7 @@ Apply now converts BGR/BGRA preview PNG reads to 2D gray before masking, matchin
 **What's new**
 
 - **Network fair-share in the title bar:** When NAS fair-share is enabled, the window title (and Windows taskbar) shows active job count, your per-job speed limit, and this instance’s throttled NAS throughput—updated every few seconds so you can see it while pipeline jobs run on other pages.
-- **Required updates:** Packaged Mason Jar now checks GitHub for the latest **stable** release on startup. If your version is behind, the app locks pipeline tools and automatically downloads and installs the update on Windows (no dismiss button). If another copy of Mason Jar is already running, you’ll be asked to close all instances first.
+- **Required updates:** Packaged PFA Jar now checks GitHub for the latest **stable** release on startup. If your version is behind, the app locks pipeline tools and automatically downloads and installs the update on Windows (no dismiss button). If another copy of PFA Jar is already running, you’ll be asked to close all instances first.
 - **Workspace hub:** The compact network-share line on the Pipeline page uses the same wording as the title bar.
 
 **Commit subject**
@@ -513,7 +513,7 @@ Limits torch/OpenMP threads in find_neurons on the Electron path. Ensures Align/
 
 **What's new**
 
-- **Server stability (multi-day uptime):** Mason Jar no longer starts a new Python process for every pipeline task. A single supervised worker runs batch jobs in-process, with proper cleanup when tools finish or the app quits. This reduces process churn on shared lab servers that previously needed a reboot after several days.
+- **Server stability (multi-day uptime):** PFA Jar no longer starts a new Python process for every pipeline task. A single supervised worker runs batch jobs in-process, with proper cleanup when tools finish or the app quits. This reduces process churn on shared lab servers that previously needed a reboot after several days.
 - Align and Adjust still use their own Python windows (required for the interactive viewers); all other tools share the worker.
 - If a job misbehaves, set environment variable `MASONJAR_PYTHON_WORKER=0` to restore the old one-process-per-job behavior.
 
@@ -582,7 +582,7 @@ Legacy-mode category menu changes in v6.0.7 wrapped tool links without full widt
 
 **What's new**
 
-- Finished Align sessions keep your tuned AP positions when you reopen and navigate with **Next**. Mason Jar no longer re-extrapolates over saved tuning on a completed session.
+- Finished Align sessions keep your tuned AP positions when you reopen and navigate with **Next**. PFA Jar no longer re-extrapolates over saved tuning on a completed session.
 - The Align setup page restores your last **Alignment Method** (Automatic, whole brain, or single hemisphere) from the saved session so reopening matches how you tuned.
 - A completed session is no longer deleted when the alignment method dropdown does not match the saved fingerprint.
 
@@ -712,7 +712,7 @@ Windows in-app updates now use a single **Update Now** button on Settings → Up
 
 **Fixes**
 
-- Updater script survives app quit more reliably and waits for Mason Jar to fully exit before replacing files.
+- Updater script survives app quit more reliably and waits for PFA Jar to fully exit before replacing files.
 - Update log is created before install starts; **Open update log** opens your settings folder if no log exists yet.
 
 **Commit subject**
@@ -749,9 +749,9 @@ Pre-release zip for validating in-app update delivery and pre-release channel ga
 
 **What's new**
 
-Mason Jar can now check for updates and install them from **Settings → Updates**. On startup, when a newer release is available, choose **Update** to open the updates page, **Download in browser**, or **Later**.
+PFA Jar can now check for updates and install them from **Settings → Updates**. On startup, when a newer release is available, choose **Update** to open the updates page, **Download in browser**, or **Later**.
 
-On **Windows**, download the published zip and use **Install and restart** for a one-click upgrade (Mason Jar quits, replaces its install folder, and relaunches). Your projects and models in `%USERPROFILE%\.masonjar` are not touched.
+On **Windows**, download the published zip and use **Install and restart** for a one-click upgrade (PFA Jar quits, replaces its install folder, and relaunches). Your projects and models in `%USERPROFILE%\.masonjar` are not touched.
 
 **Advanced:** enable **Allow pre-release versions** to receive beta builds from GitHub when they are newer than the latest stable release.
 
@@ -814,7 +814,7 @@ The detection summary step no longer suggests or applies confidence, area, or ec
 
 **What's new**
 
-Cell Detection is now a three-step wizard: configure parameters, watch progress, then review QC charts and algorithmic suggestions for confidence, area, eccentricity, and intensity cutoff. After each run Mason Jar analyzes your detections for a low- vs high-intensity split and shows recommended tuning values. Use **Apply suggestions** to pre-fill advanced settings and re-run. An optional **Intensity cutoff** in advanced settings drops dim false positives (defaults to off so existing workflows are unchanged).
+Cell Detection is now a three-step wizard: configure parameters, watch progress, then review QC charts and algorithmic suggestions for confidence, area, eccentricity, and intensity cutoff. After each run PFA Jar analyzes your detections for a low- vs high-intensity split and shows recommended tuning values. Use **Apply suggestions** to pre-fill advanced settings and re-run. An optional **Intensity cutoff** in advanced settings drops dim false positives (defaults to off so existing workflows are unchanged).
 
 **Changes**
 
@@ -856,7 +856,7 @@ Detection QC replaces the long-axis histogram with area versus the screening cut
 
 **What's new**
 
-After **Cell Detection** finishes, Mason Jar saves PNG histograms in the detection output folder so you can tune confidence, size, and eccentricity without guess-and-check. Run-level charts (confidence, bounding-box long axis, eccentricity) are written every time; optional per-slice charts are available from a checkbox on the Detect page and in the batch wizard.
+After **Cell Detection** finishes, PFA Jar saves PNG histograms in the detection output folder so you can tune confidence, size, and eccentricity without guess-and-check. Run-level charts (confidence, bounding-box long axis, eccentricity) are written every time; optional per-slice charts are available from a checkbox on the Detect page and in the batch wizard.
 
 Sharpen and **Top-hat filter** wizards now include a **?** help button next to **Set as active max task for this branch**, explaining what that option does and when to use it before running **Cell Detection** or **Isolate Regions**.
 
@@ -1061,7 +1061,7 @@ Sharpen: fix 16-bit corruption on large tiled max projections
 
 **What's new**
 
-- Align: Mason Jar minimizes when Napari opens and shows a clear handoff message; Mason Jar restores when you Finish or Cancel.
+- Align: PFA Jar minimizes when Napari opens and shows a clear handoff message; PFA Jar restores when you Finish or Cancel.
 - Align: Napari layout uses a top toolbar plus Tuning/Options docks on the left; layer list and layer controls on the right.
 
 **Fixes**
@@ -1131,7 +1131,7 @@ Sharpen: fix batch failures on Windows by processing slices sequentially
 
 **What's new**
 
-Align again saves your AP and angle tuning when you close Napari and re-open Align. Forward AP suggestions follow the spacing you set on sections you have already tuned. Mason Jar automatically removes broken alignment session files from your project's DAPI folder when they cannot be loaded.
+Align again saves your AP and angle tuning when you close Napari and re-open Align. Forward AP suggestions follow the spacing you set on sections you have already tuned. PFA Jar automatically removes broken alignment session files from your project's DAPI folder when they cannot be loaded.
 
 **Fixes**
 
@@ -1171,7 +1171,7 @@ Align: fix AP spacing direction, persistence races, and log visibility
 
 **What's new**
 
-Align again opens with sensible predicted AP positions and angles on the first section. If a bad autosave from v4.0.6 is on disk, Mason Jar clears it automatically and re-runs predictions.
+Align again opens with sensible predicted AP positions and angles on the first section. If a bad autosave from v4.0.6 is on disk, PFA Jar clears it automatically and re-runs predictions.
 
 **Fixes**
 
@@ -1207,7 +1207,7 @@ Align saves tuning when Napari closes; fix false exit code 1 on window X
 
 **What's new**
 
-Align and Viewer/Editor no longer leave Mason Jar stuck when you **Cancel** or close the viewer window. Alignment tuning is saved on Cancel as well as when you close Napari. Tissue cleanup **Apply** handles large NAS z-stack bundles without crashing. **Check Orientation Consistency** applies confirmed rotations across the full pipeline, and the orient grid lists all sections.
+Align and Viewer/Editor no longer leave PFA Jar stuck when you **Cancel** or close the viewer window. Alignment tuning is saved on Cancel as well as when you close Napari. Tissue cleanup **Apply** handles large NAS z-stack bundles without crashing. **Check Orientation Consistency** applies confirmed rotations across the full pipeline, and the orient grid lists all sections.
 
 **Changes**
 
@@ -1226,7 +1226,7 @@ Align and Adjust Cancel no longer hang; tissue cleanup and geometry repair fixes
 
 **What's new**
 
-Closing the Atlas Alignment Napari window without clicking **Finish** no longer leaves Mason Jar stuck on a running job. Your section tuning (AP, angles, layout) is saved automatically, and the Align page returns to **Run** so you can reopen and continue—or click **Finish** when you are ready to warp.
+Closing the Atlas Alignment Napari window without clicking **Finish** no longer leaves PFA Jar stuck on a running job. Your section tuning (AP, angles, layout) is saved automatically, and the Align page returns to **Run** so you can reopen and continue—or click **Finish** when you are ready to warp.
 
 **Changes**
 
@@ -1308,7 +1308,7 @@ Align Sections now handles mixed whole-brain and single-hemisphere series automa
 
 **Commit subject**
 
-Mason Jar 4.0 — mixed-section align, Viewer/Editor Paint dock, GPU detection
+PFA Jar 4.0 — mixed-section align, Viewer/Editor Paint dock, GPU detection
 
 **Commit body**
 
@@ -1469,7 +1469,7 @@ Fixes a Windows crash during long jobs (e.g. Apply geometry) when network fair-s
 **Changes**
 
 - Registry heartbeats use Windows-safe writes with retry; failures are logged, not fatal.
-- Orient / geometry and other heavy jobs continue even if `%ProgramData%\MasonJar\io-fairshare\registry\` is briefly locked.
+- Orient / geometry and other heavy jobs continue even if `%ProgramData%\PFAJar\io-fairshare\registry\` is briefly locked.
 
 **Commit subject**
 
@@ -1499,13 +1499,13 @@ Viewer/Editor brush overlay fix and compact parcellation dock
 
 **What's new**
 
-Network sharing settings moved to **Start → Settings → Network**. An admin or first user on a shared server can pick mapped drives or UNC shares with **Select network drives…**; Mason Jar saves normalized drive/share roots for everyone on that machine.
+Network sharing settings moved to **Start → Settings → Network**. An admin or first user on a shared server can pick mapped drives or UNC shares with **Select network drives…**; PFA Jar saves normalized drive/share roots for everyone on that machine.
 
 **Changes**
 
 - Settings hub with **Network** page (per-user fair-share toggle and link speed unchanged).
 - Shared `nas_path_prefixes` list visible to all RDP users; no manual JSON editing required for typical setup.
-- Multi-select folder picker writes machine-wide config under `%ProgramData%\MasonJar\io-fairshare\`.
+- Multi-select folder picker writes machine-wide config under `%ProgramData%\PFAJar\io-fairshare\`.
 
 **Commit subject**
 
@@ -1539,7 +1539,7 @@ Network fair-share now throttles mapped NAS drives (e.g. `Z:\`) when you list th
 
 **Changes**
 
-- `nas_path_prefixes` in `%ProgramData%\MasonJar\io-fairshare\config.json` (e.g. `["Z:\\"]`).
+- `nas_path_prefixes` in `%ProgramData%\PFAJar\io-fairshare\config.json` (e.g. `["Z:\\"]`).
 
 **Commit subject**
 
@@ -1551,7 +1551,7 @@ Fix NAS fair-share for mapped drive letters on Windows
 
 **What's new**
 
-When several people run Mason Jar on the same Windows compute server, pipeline jobs now **share NAS bandwidth fairly** instead of one instance saturating the network. Each active job gets a slice of the link speed; when fewer jobs are running, each job can use more. Turn it on from the start hub under **Network sharing** (on by default). Link speed can auto-detect or be set manually if your server has multiple NICs.
+When several people run PFA Jar on the same Windows compute server, pipeline jobs now **share NAS bandwidth fairly** instead of one instance saturating the network. Each active job gets a slice of the link speed; when fewer jobs are running, each job can use more. Turn it on from the start hub under **Network sharing** (on by default). Link speed can auto-detect or be set manually if your server has multiple NICs.
 
 **Changes**
 
@@ -1561,11 +1561,11 @@ When several people run Mason Jar on the same Windows compute server, pipeline j
 
 **Commit subject**
 
-Share NAS bandwidth fairly when many Mason Jar instances run on one server
+Share NAS bandwidth fairly when many PFA Jar instances run on one server
 
 **Commit body**
 
-Mason Jar 3.2.0 adds machine-wide adaptive I/O fair-share so pipeline jobs on a shared compute server split NAS bandwidth instead of one instance saturating the NIC. Configure link speed from the start hub Network sharing section.
+PFA Jar 3.2.0 adds machine-wide adaptive I/O fair-share so pipeline jobs on a shared compute server split NAS bandwidth instead of one instance saturating the NIC. Configure link speed from the start hub Network sharing section.
 
 ---
 
@@ -1589,7 +1589,7 @@ Sharpen and Adjust UX improvements plus parcellation include list for v3.1
 
 **Commit body**
 
-Mason Jar 3.1.0 makes preprocess previews manual and fast, reworks the Adjust layout, switches bulk parcellation to included regions, drops Count layer info, and fixes tissue mask overlay semantics.
+PFA Jar 3.1.0 makes preprocess previews manual and fast, reworks the Adjust layout, switches bulk parcellation to included regions, drops Count layer info, and fixes tissue mask overlay semantics.
 
 ---
 
@@ -1611,7 +1611,7 @@ Improve tissue cleanup wizard and preprocess navigation for v3
 
 **Commit body**
 
-Renames the tissue edge tool, fixes trace JSON and mask UX, and makes sharpen/top-hat wizards easier to leave. Ships as Mason Jar 3.0.0 with desktop builds for macOS and Windows.
+Renames the tissue edge tool, fixes trace JSON and mask UX, and makes sharpen/top-hat wizards easier to leave. Ships as PFA Jar 3.0.0 with desktop builds for macOS and Windows.
 
 ---
 
@@ -1619,7 +1619,7 @@ Renames the tissue edge tool, fixes trace JSON and mask UX, and makes sharpen/to
 
 **What's new**
 
-**Tissue edge cleanup** is a new wizard under Image preprocessing. Open a DAPI preview for each section, use **Attempt Auto** or **Trace edge then Auto** to build a keep mask, touch up with the **Eraser**, then confirm and **Apply**. Mason Jar backs up originals under `.masonjar/tissue_cleanup_backup/` and updates DAPI previews, orient previews, original-scan z-stacks, and max/sharpen/top-hat TIFFs for edited sections only. If you already ran **Align**, run it again after cleanup.
+**Tissue edge cleanup** is a new wizard under Image preprocessing. Open a DAPI preview for each section, use **Attempt Auto** or **Trace edge then Auto** to build a keep mask, touch up with the **Eraser**, then confirm and **Apply**. PFA Jar backs up originals under `.masonjar/tissue_cleanup_backup/` and updates DAPI previews, orient previews, original-scan z-stacks, and max/sharpen/top-hat TIFFs for edited sections only. If you already ran **Align**, run it again after cleanup.
 
 **Changes**
 

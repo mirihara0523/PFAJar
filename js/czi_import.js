@@ -1739,7 +1739,7 @@ function assessOrientPreviewHealth(bundleRoot, cziImport) {
 	}
 	cziImport = cziImport || {};
 	var audit = auditCziImportCompletion(bundleRoot, cziImport, {});
-	var missingOrient = findMissingOrientDapiPreviews(bundleRoot);
+	var missingOrient = audit.missingOrientDapiPreviews;
 	var tiffIn00 = (audit.lowResTiffIssues || []).filter(function (i) {
 		return i.kind === "dapi_tif";
 	});

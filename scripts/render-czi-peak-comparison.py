@@ -1,7 +1,7 @@
 """Render exact and sampled-peak previews from one CZI channel.
 
 This is a read-only diagnostic for assessing ``uint16_peak_sample_scale``.
-It never creates or changes a Mason Jar bundle.  It writes PNG previews and a
+It never creates or changes a PFA Jar bundle.  It writes PNG previews and a
 JSON manifest only in the explicitly supplied output directory.
 """
 from __future__ import annotations

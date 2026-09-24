@@ -1,4 +1,4 @@
-"""Top-hat filter (OpenCV MORPH_TOPHAT + gamma) for Mason Jar preprocess wizard."""
+"""Top-hat filter (OpenCV MORPH_TOPHAT + gamma) for PFA Jar preprocess wizard."""
 
 from __future__ import annotations
 

@@ -18,6 +18,17 @@ TIER_TARGET_LEVEL: dict[str, int] = {
 FULL_DETAIL_TIER = "full"
 PARTS_TIER = "parts"
 
+# Display/search-only full-name overrides for structures whose Allen CCF
+# ``name`` field reads ambiguously out of context (e.g. "Anterior area" for
+# VISa, which is unambiguous only inside its parent group). Keyed by
+# acronym. This never touches the canonical ``name`` field loaded from
+# structure_graph.json -- it only supplies an extra searchable/displayable
+# string via each node's ``alias`` key, so the underlying Allen ontology
+# data and any code that reads ``name`` directly is unaffected.
+DISPLAY_NAME_ALIASES: dict[str, str] = {
+    "VISa": "Anterior visual area",
+}
+
 # Semantic tier definitions. Order is the order shown in the Hierarchy dropdown.
 # Rules are derived from CCFv3 ``st_level`` plus simple name heuristics so a
 # future ontology update keeps working without hardcoded acronym lists.
@@ -277,6 +288,7 @@ def _flatten_graph(
         "id": graph["id"],
         "acronym": graph["acronym"],
         "name": graph["name"],
+        "alias": DISPLAY_NAME_ALIASES.get(graph.get("acronym"), ""),
         "st_level": graph["st_level"],
         "idPath": current_path,
         "id_path": "/".join(str(i) for i in current_path),
@@ -385,7 +397,8 @@ def list_regions_for_tier(
             continue
         if q:
             hay = (
-                f"{node['acronym']} {node['name']} {node['groupParentAcronym']}"
+                f"{node['acronym']} {node['name']} {node.get('alias', '')} "
+                f"{node['groupParentAcronym']}"
             ).lower()
             if q not in hay:
                 continue
@@ -516,7 +529,8 @@ def list_regions_at_level(
             continue
         if q:
             hay = (
-                f"{node['acronym']} {node['name']} {node['groupParentAcronym']}"
+                f"{node['acronym']} {node['name']} {node.get('alias', '')} "
+                f"{node['groupParentAcronym']}"
             ).lower()
             if q not in hay:
                 continue

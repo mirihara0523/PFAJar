@@ -23,9 +23,9 @@ After **4–7 days** uptime the server becomes globally slow. Task Manager does 
 
 ## Conclusions (2026-07 investigation)
 
-1. **Windows-first diagnosis** — not an app log / Mason Jar gate problem. Generic isolation test: 500 × `cmd.exe /c exit` → **`Proc_out` +1,443**, **`Proc_frees` unchanged (8)**.
-2. **Mason Jar v6.0.12+ worker** (supervisor + [`py/masonjar_worker.py`](../py/masonjar_worker.py)) is **shipped** and correct app hygiene; it **did not** materially change system `ΔProc_out/hour` (~2700–3000/h).
-3. **Do not** hobble Mason Jar parallelism (shared worker rejected). **Do not** install new third-party products to fix the leak.
+1. **Windows-first diagnosis** — not an app log / PFA Jar gate problem. Generic isolation test: 500 × `cmd.exe /c exit` → **`Proc_out` +1,443**, **`Proc_frees` unchanged (8)**.
+2. **PFA Jar v6.0.12+ worker** (supervisor + [`py/masonjar_worker.py`](../py/masonjar_worker.py)) is **shipped** and correct app hygiene; it **did not** materially change system `ΔProc_out/hour` (~2700–3000/h).
+3. **Do not** hobble PFA Jar parallelism (shared worker rejected). **Do not** install new third-party products to fix the leak.
 
 ---
 
@@ -61,12 +61,12 @@ Driver link date **2016** — very old for Win11 22621.
 ### Other context
 
 - Multi-user RDP (Matt, John, Devin); long **Disconnected** sessions add churn.
-- Mason Jar: frequent process spawner; heavy `Z:` I/O.
+- PFA Jar: frequent process spawner; heavy `Z:` I/O.
 - Windows hotfixes last noted **2025-01-22** on build 22621.4317.
 
 ---
 
-## Operator next steps (Matt / IT — not Mason Jar releases)
+## Operator next steps (Matt / IT — not PFA Jar releases)
 
 | Priority | Action |
 |----------|--------|
@@ -76,11 +76,11 @@ Driver link date **2016** — very old for Win11 22621.
 | 4 | **Reboot cadence:** every **5–7 days** if unresolved, before `Proc_MB` ~1000 |
 | 5 | **Maintenance trip:** poolmon.exe (WDK on laptop) + optional kernel debug; Microsoft case if inconclusive |
 
-**Hard rules for Mason Jar agents:** Document host findings only. Never install Sentinel/HASP/FlexNet or other third-party products as a Mason Jar fix. Never run `m465_*` repro scripts on KIM-SERVER.
+**Hard rules for PFA Jar agents:** Document host findings only. Never install Sentinel/HASP/FlexNet or other third-party products as a PFA Jar fix. Never run `m465_*` repro scripts on KIM-SERVER.
 
 ---
 
-## Mason Jar app scope (closed)
+## PFA Jar app scope (closed)
 
 | Item | Status |
 |------|--------|

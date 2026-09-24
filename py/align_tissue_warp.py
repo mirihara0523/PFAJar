@@ -20,7 +20,7 @@ from align_tissue_mask import (
     keep_mask_stats,
     resize_mask_to_shape,
 )
-from demons import register_to_atlas
+from demons import DEFAULT_REGISTRATION_QUALITY, register_to_atlas
 from slice_atlas import mask_slice_by_region
 
 
@@ -44,6 +44,7 @@ def _register_pass(
     damage_mask: np.ndarray | None = None,
     region_code: str | None = None,
     structure_map: dict | None = None,
+    registration_quality: str = DEFAULT_REGISTRATION_QUALITY,
 ):
     sec = np.array(section, copy=True)
     lab = np.array(label, copy=True)
@@ -57,6 +58,7 @@ def _register_pass(
         structure_map_path,
         fixed_keep_mask=fixed_keep_mask,
         moving_exclude_mask=exclude,
+        registration_quality=registration_quality,
     )
 
 
@@ -94,6 +96,7 @@ def warp_phase1_only(
     damage_mask,
     structure_map=None,
     region_code="A",
+    registration_quality=DEFAULT_REGISTRATION_QUALITY,
 ):
     km = keep_mask
     if region_code and region_code != "A" and structure_map is not None:
@@ -105,6 +108,7 @@ def warp_phase1_only(
         structure_map_path,
         fixed_keep_mask=km,
         damage_mask=damage_mask,
+        registration_quality=registration_quality,
     )
 
 
@@ -118,6 +122,7 @@ def warp_per_island(
     damage_mask,
     structure_map=None,
     region_code="A",
+    registration_quality=DEFAULT_REGISTRATION_QUALITY,
 ):
     ccs = component_masks(keep_mask)
     if len(ccs) <= 1:
@@ -131,6 +136,7 @@ def warp_per_island(
             damage_mask=damage_mask,
             structure_map=structure_map,
             region_code=region_code,
+            registration_quality=registration_quality,
         )
     sec = section
     lab = label
@@ -145,6 +151,7 @@ def warp_per_island(
             structure_map_path,
             fixed_keep_mask=cc,
             damage_mask=damage_mask,
+            registration_quality=registration_quality,
         )
         passes.append((wl, wa, cl, cc))
     return _composite_results(tissue, passes, keep_mask)
@@ -159,6 +166,7 @@ def warp_region_dual(
     keep_mask,
     damage_mask,
     structure_map,
+    registration_quality=DEFAULT_REGISTRATION_QUALITY,
 ):
     ccs = component_masks(keep_mask)
     if len(ccs) < 2:
@@ -171,6 +179,7 @@ def warp_region_dual(
             keep_mask=keep_mask,
             damage_mask=damage_mask,
             structure_map=structure_map,
+            registration_quality=registration_quality,
         )
     ccs_by_y = sorted(ccs, key=lambda cc: float(np.mean(np.where(cc >= 128)[0])))
     top_cc, bottom_cc = ccs_by_y[0], ccs_by_y[-1]
@@ -185,6 +194,7 @@ def warp_region_dual(
             damage_mask=damage_mask,
             region_code=region,
             structure_map=structure_map,
+            registration_quality=registration_quality,
         )
         passes.append((wl, wa, cl, cc))
     return _composite_results(tissue, passes, keep_mask)
@@ -200,6 +210,7 @@ def warp_ap_vertical_split(
     damage_mask,
     structure_map=None,
     region_code="A",
+    registration_quality=DEFAULT_REGISTRATION_QUALITY,
 ):
     stats = keep_mask_stats(keep_mask)
     centroids = stats.get("component_centroids") or []
@@ -225,6 +236,7 @@ def warp_ap_vertical_split(
             damage_mask=damage_mask,
             structure_map=structure_map,
             region_code=region_code,
+            registration_quality=registration_quality,
         )
     sec = section
     lab = label
@@ -239,6 +251,7 @@ def warp_ap_vertical_split(
             structure_map_path,
             fixed_keep_mask=half_mask,
             damage_mask=damage_mask,
+            registration_quality=registration_quality,
         )
         passes.append((wl, wa, cl, half_mask))
     return _composite_results(tissue, passes, keep_mask)
@@ -254,6 +267,7 @@ def warp_constrained_bspline(
     damage_mask,
     structure_map=None,
     region_code="A",
+    registration_quality=DEFAULT_REGISTRATION_QUALITY,
 ):
     refined_keep = np.array(keep_mask, copy=True)
     corridor = gap_corridor_mask(keep_mask)
@@ -269,6 +283,7 @@ def warp_constrained_bspline(
         damage_mask=damage_mask,
         structure_map=structure_map,
         region_code=region_code,
+        registration_quality=registration_quality,
     )
 
 
@@ -282,6 +297,7 @@ def warp_hybrid_ab(
     damage_mask,
     structure_map,
     region_code="A",
+    registration_quality=DEFAULT_REGISTRATION_QUALITY,
 ):
     stats = keep_mask_stats(keep_mask)
     if stats["n_components"] >= 2 and structure_map is not None:
@@ -293,6 +309,7 @@ def warp_hybrid_ab(
             keep_mask=keep_mask,
             damage_mask=damage_mask,
             structure_map=structure_map,
+            registration_quality=registration_quality,
         )
     return warp_phase1_only(
         tissue,
@@ -303,6 +320,7 @@ def warp_hybrid_ab(
         damage_mask=damage_mask,
         structure_map=structure_map,
         region_code=region_code,
+        registration_quality=registration_quality,
     )
 
 
@@ -318,6 +336,7 @@ def warp_section_with_masks(
     region_code: str = "A",
     structure_map: dict | None = None,
     slice_id: str = "",
+    registration_quality: str = DEFAULT_REGISTRATION_QUALITY,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     """Run registration with optional tissue keep mask and damage exclusion."""
     mode = warp_mode or WARP_MODE_DEFAULT
@@ -331,10 +350,12 @@ def warp_section_with_masks(
         "tissue_mask_warp_mode": mode,
         "keep_components": stats.get("n_components", 0),
         "damage_mask_applied": damage_mask is not None and bool(np.any(damage_mask)),
+        "registration_quality": registration_quality,
     }
     _emit_log(
         f"align_warp_mode slice={slice_id} mode={mode} "
-        f"components={meta['keep_components']} damage={meta['damage_mask_applied']}"
+        f"components={meta['keep_components']} damage={meta['damage_mask_applied']} "
+        f"registration_quality={registration_quality}"
     )
 
     if keep_mask is None:
@@ -347,6 +368,7 @@ def warp_section_with_masks(
             damage_mask=damage_mask,
             region_code=region_code,
             structure_map=structure_map,
+            registration_quality=registration_quality,
         )
         meta["tissue_mask_used"] = False
         meta["tissue_mask_warp_mode"] = "standard"
@@ -370,6 +392,7 @@ def warp_section_with_masks(
             keep_mask=keep_mask,
             damage_mask=damage_mask,
             structure_map=structure_map,
+            registration_quality=registration_quality,
         )
     elif fn is warp_hybrid_ab:
         wl, wa, cl = fn(
@@ -381,6 +404,7 @@ def warp_section_with_masks(
             damage_mask=damage_mask,
             structure_map=structure_map,
             region_code=region_code,
+            registration_quality=registration_quality,
         )
     else:
         wl, wa, cl = fn(
@@ -392,5 +416,6 @@ def warp_section_with_masks(
             damage_mask=damage_mask,
             structure_map=structure_map,
             region_code=region_code,
+            registration_quality=registration_quality,
         )
     return wl, wa, cl, meta

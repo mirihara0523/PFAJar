@@ -1,8 +1,8 @@
 "use strict";
 
-/** Shared Mason Jar branding and dual Bell Jar compatibility constants. */
+/** Shared PFA Jar branding and dual Bell Jar compatibility constants. */
 module.exports = {
-	PRODUCT_NAME: "Mason Jar",
+	PRODUCT_NAME: "PFA Jar",
 	LEGACY_PRODUCT_NAME: "Bell Jar",
 	HOME_DIR: ".masonjar",
 	LEGACY_HOME_DIR: ".belljar",
@@ -65,5 +65,5 @@ module.exports = {
 	LOG_SESSION_KEY: "masonjar.logSession",
 	LEGACY_LOG_UI_KEY: "log",
 	LEGACY_LOG_TIME_KEY: "logTime",
-	GITHUB_REPO: "matsojr22/masonjar",
+	GITHUB_REPO: "mirihara0523/PFAJar",
 };

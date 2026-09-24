@@ -1,4 +1,4 @@
-"""Enumerate on-disk image assets tied to a slice in a Mason Jar bundle."""
+"""Enumerate on-disk image assets tied to a slice in a PFA Jar bundle."""
 
 from __future__ import annotations
 

@@ -43,7 +43,7 @@ MIN_COMPONENT_AREA = 64
 
 
 def resolve_bundle_root_from_dapi_dir(input_path: str | Path) -> Path | None:
-    """Walk parents from the DAPI input folder to find a Mason Jar bundle root."""
+    """Walk parents from the DAPI input folder to find a PFA Jar bundle root."""
     start = Path(input_path).resolve()
     if not start.is_dir():
         start = start.parent

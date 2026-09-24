@@ -1,4 +1,4 @@
-"""Read-only summary of a Mason Jar CZI import log, including isolated retries."""
+"""Read-only summary of a PFA Jar CZI import log, including isolated retries."""
 from __future__ import annotations
 
 import argparse

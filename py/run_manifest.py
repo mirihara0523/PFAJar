@@ -1,4 +1,4 @@
-"""Write run_manifest.json for Mason Jar pipeline run leaves."""
+"""Write run_manifest.json for PFA Jar pipeline run leaves."""
 
 from __future__ import annotations
 

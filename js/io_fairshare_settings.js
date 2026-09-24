@@ -129,7 +129,7 @@ function bindNetworkSharing(rootId) {
 			"Could not save shared network settings.";
 		setNasFeedback(
 			msg +
-				" Ensure %ProgramData%\\MasonJar\\io-fairshare is writable by all users (see lab network guide).",
+				" Ensure %ProgramData%\\PFAJar\\io-fairshare is writable by all users (see lab network guide).",
 			true,
 		);
 	});

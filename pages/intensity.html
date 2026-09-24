@@ -23,7 +23,7 @@
       http-equiv="X-Content-Security-Policy"
       content="default-src 'self'; script-src 'self'  https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com;"
     />
-    <title>Mason Jar</title>
+    <title>PFA Jar</title>
   </head>
   <body>
     <div id="parent" class="container h-100">
@@ -34,9 +34,9 @@
           <div id="labelResolutionBanner" class="alert alert-warning text-start d-none workspace-block" role="status"></div>
           <p>
             <br />
-            Outputs the ROIs for a given Mason Jar aligned brain. The ROI pacakges are only compatible with
+            Outputs the ROIs for a given PFA Jar aligned brain. The ROI pacakges are only compatible with
             custom graphin tools at this time. The output is a series of .pkl files that contain the intensity, verticies, and region info.
-            To use select the directory with the intensity images (named in the same scheme as the Mason Jar aligned images), the brain annotation pkls, and your output directory.
+            To use select the directory with the intensity images (named in the same scheme as the PFA Jar aligned images), the brain annotation pkls, and your output directory.
             Each slice uses the Align annotation PKL for that slice (e.g. <code>Annotation_M528_s061.pkl</code> for <code>M528_s061.ome.tiff</code>), not list order alone.
             Optionally include a folder of low-resolution DAPI images with the same filename stem as each intensity image
             (<code>.png</code>, <code>.tif</code>/<code>.tiff</code>, <code>.jpg</code>, or <code>&lt;stem&gt;_dapi.png</code> / <code>_dapi.tif</code>).

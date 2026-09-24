@@ -1,4 +1,4 @@
-"""Shared helpers for Mason Jar CZI import."""
+"""Shared helpers for PFA Jar CZI import."""
 
 from __future__ import annotations
 

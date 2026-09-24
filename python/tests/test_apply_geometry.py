@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 import tifffile as tiff
@@ -151,6 +152,32 @@ def test_transform_zstack_flip_x(tmp_path: Path) -> None:
     assert loaded.shape == stack.shape
     for zi in range(2):
         assert np.array_equal(loaded[zi], np.fliplr(stack[zi]))
+
+
+def test_transform_2d_original_scans_rotate_is_contiguous_for_zlib(tmp_path: Path) -> None:
+    """Regression for Errno 22 on compressed write of a non-stack original_scans TIFF.
+
+    apply_ops_to_array returns a np.rot90/fliplr/flipud VIEW for a 2D array
+    (non-contiguous strides). original_scans files are written with
+    compression="zlib", and imagecodecs' zlib encoder needs a contiguous
+    buffer -- a non-contiguous array raised OSError [Errno 22] Invalid
+    argument. Z-stacks were unaffected because np.stack() already copies
+    into a contiguous array, so only the flattened 2D original_scans file
+    hit this. See _write_tiff_array's np.ascontiguousarray normalization.
+    """
+    from apply_geometry import transform_file
+
+    bundle = tmp_path / "Brain_masonjar"
+    path = bundle / "data" / "original_scans" / "S1.tif"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.arange(20, dtype=np.uint8).reshape(4, 5)
+    tiff.imwrite(path, arr, photometric="minisblack")
+
+    transform_file(path, compose_ops(90, False, False))
+
+    loaded = tiff.imread(path)
+    expected = np.rot90(arr, k=-1)
+    assert np.array_equal(loaded, expected)
 
 
 def test_geometry_progress_path_key(tmp_path: Path) -> None:
@@ -454,3 +481,104 @@ def test_apply_geometry_writes_history_on_success(tmp_path: Path) -> None:
     lines = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert any(entry.get("kind") == "file" and entry.get("slice_id") == slice_id for entry in lines)
     assert any(entry.get("kind") == "run" and entry.get("ok") is True for entry in lines)
+
+
+def test_collect_geometry_jobs_includes_tissue_cleanup_mask(tmp_path: Path) -> None:
+    """Orientation-sync: an archived tissue-cleanup keep-mask must ride along
+    with the rest of a slice's files on a normal (non-reextract-scoped) job,
+    since Alignment (align_tissue_mask.load_keep_mask -> map.py) reads it
+    as-is and would otherwise warp against a stale orientation."""
+    from apply_geometry import collect_geometry_jobs
+
+    bundle = tmp_path / "Brain_masonjar"
+    slice_id = "M1"
+    dapi = bundle / "data/counting/00_dapi" / f"{slice_id}.png"
+    dapi.parent.mkdir(parents=True, exist_ok=True)
+    dapi.write_bytes(b"x")
+    mask_path = bundle / ".masonjar/tissue_cleanup_masks" / f"{slice_id}.png"
+    mask_path.parent.mkdir(parents=True, exist_ok=True)
+    mask_path.write_bytes(b"x")
+
+    cfg = {"channels": []}
+    geometry = {slice_id: {"ops": ["rot90"]}}
+    jobs = collect_geometry_jobs(bundle, geometry, cfg)
+    assert len(jobs) == 1
+    assert mask_path in jobs[0][2]
+
+
+def test_collect_geometry_jobs_skips_missing_tissue_cleanup_mask(tmp_path: Path) -> None:
+    """No archived mask for this slice -> nothing added, no error."""
+    from apply_geometry import collect_geometry_jobs
+
+    bundle = tmp_path / "Brain_masonjar"
+    slice_id = "M1"
+    dapi = bundle / "data/counting/00_dapi" / f"{slice_id}.png"
+    dapi.parent.mkdir(parents=True, exist_ok=True)
+    dapi.write_bytes(b"x")
+
+    cfg = {"channels": []}
+    geometry = {slice_id: {"ops": ["rot90"]}}
+    jobs = collect_geometry_jobs(bundle, geometry, cfg)
+    assert len(jobs) == 1
+    names = {p.name for p in jobs[0][2]}
+    assert names == {f"{slice_id}.png"}
+
+
+def test_collect_geometry_jobs_scoped_reextract_skips_tissue_cleanup_mask(
+    tmp_path: Path,
+) -> None:
+    """Reextract-scope-limited jobs catch up a narrow set of re-extracted
+    files with ops already applied to the rest of the slice in an earlier
+    full pass. An archived mask (if any) was already oriented correctly by
+    that earlier pass, so it must NOT be re-transformed here -- doing so
+    would double-apply the ops (e.g. rot90 twice = 180 degrees off)."""
+    from apply_geometry import collect_geometry_jobs
+
+    bundle = tmp_path / "Brain_masonjar"
+    slice_id = "M528_s001"
+    dapi_png = bundle / "data/counting/00_dapi" / f"{slice_id}.png"
+    prev_somata = bundle / "data/counting/_previews" / f"{slice_id}_somata.png"
+    orig = bundle / "data/original_scans/somata" / f"{slice_id}.tif"
+    mask_path = bundle / ".masonjar/tissue_cleanup_masks" / f"{slice_id}.png"
+    for p in (dapi_png, prev_somata, orig, mask_path):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+
+    cfg = {
+        "channels": [{"role": "signal_somata", "keep": True}],
+        "reextract_geometry_scope": {slice_id: ["signal_somata"]},
+    }
+    geometry = {slice_id: {"ops": ["rot90"]}}
+    jobs = collect_geometry_jobs(bundle, geometry, cfg)
+    assert len(jobs) == 1
+    assert mask_path not in jobs[0][2]
+
+
+def test_run_transform_jobs_reorients_tissue_cleanup_mask(tmp_path: Path) -> None:
+    """End-to-end: running the normal geometry-apply loop actually rewrites
+    the archived mask file with the same ops applied to everything else."""
+    from apply_geometry import collect_geometry_jobs, run_transform_jobs
+
+    bundle = tmp_path / "Brain_masonjar"
+    slice_id = "M1"
+    h, w = 4, 6
+    dapi = bundle / "data/counting/00_dapi" / f"{slice_id}.png"
+    dapi.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(dapi), np.arange(h * w, dtype=np.uint8).reshape(h, w))
+
+    mask_arr = np.zeros((h, w), dtype=np.uint8)
+    mask_arr[:, :2] = 255  # asymmetric keep-region so rotation is distinguishable
+    mask_path = bundle / ".masonjar/tissue_cleanup_masks" / f"{slice_id}.png"
+    mask_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(mask_path), mask_arr)
+
+    cfg = {"channels": []}
+    geometry = {slice_id: {"ops": ["rot90"]}}
+    jobs = collect_geometry_jobs(bundle, geometry, cfg)
+    changed, _bytes_total, failed, _total = run_transform_jobs(bundle, jobs, None, False)
+
+    assert failed == []
+    assert changed == 2  # dapi png + mask png
+    got = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    expected = apply_ops_to_array(mask_arr, compose_ops_from_spec({"ops": ["rot90"]}))
+    assert np.array_equal(got, expected)

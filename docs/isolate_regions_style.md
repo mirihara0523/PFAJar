@@ -64,7 +64,7 @@ Shows distinct group parents among **visible** available + selected rows. Search
 
 ## Theme
 
-Do not recolor Mason Jar primary/secondary buttons. Tinting applies only to the region picker lists and legend on [`pages/intensity_wizard.html`](../pages/intensity_wizard.html).
+Do not recolor PFA Jar primary/secondary buttons. Tinting applies only to the region picker lists and legend on [`pages/intensity_wizard.html`](../pages/intensity_wizard.html).
 
 ## Extension
 

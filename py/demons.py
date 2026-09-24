@@ -11,6 +11,48 @@ def _emit_log(message):
     print(f"LOG: {message}", flush=True)
 
 
+# Registration quality presets consumed by ``register_to_atlas``.
+#
+# "standard" reproduces the pipeline's original fixed behavior byte-for-byte
+# (360x360 working resolution, 5x5 B-spline control-point mesh, 25
+# iterations) and remains the default for every caller that does not pass
+# ``registration_quality`` explicitly.
+#
+# "precise" trades roughly 2-4x more per-section registration time for a
+# working resolution and B-spline mesh density that can represent finer
+# internal anatomical structures (ventricle walls, cortical layer bands,
+# etc.) that "standard" flattens away at 360x360 with only 25 coarse
+# control points.
+REGISTRATION_QUALITY_PRESETS = {
+    "standard": {
+        "working_size": 360,
+        "bspline_mesh_size": 5,
+        "bspline_iterations": 25,
+    },
+    "precise": {
+        "working_size": 512,
+        "bspline_mesh_size": 8,
+        "bspline_iterations": 40,
+    },
+}
+DEFAULT_REGISTRATION_QUALITY = "standard"
+
+
+def _resolve_registration_quality_preset(registration_quality):
+    """Return the preset dict for ``registration_quality``, warning and
+    falling back to the default preset for an unknown name instead of
+    raising, so a bad/legacy value never blocks a Finish warp pass."""
+    preset = REGISTRATION_QUALITY_PRESETS.get(registration_quality)
+    if preset is None:
+        _emit_log(
+            "registration_quality_unknown "
+            f"value={registration_quality!r} falling_back_to="
+            f"{DEFAULT_REGISTRATION_QUALITY!r}"
+        )
+        preset = REGISTRATION_QUALITY_PRESETS[DEFAULT_REGISTRATION_QUALITY]
+    return preset
+
+
 def match_histograms(to_match, match_to):
     """
     Match the to_match histogram to the match_to using sitk
@@ -128,7 +170,13 @@ def _execute_registration_stage(
     return geometry_fallback()
 
 
-def multimodal_registration(fixed, moving, fixed_metric_mask=None):
+def multimodal_registration(
+    fixed,
+    moving,
+    fixed_metric_mask=None,
+    bspline_mesh_size=5,
+    bspline_iterations=25,
+):
     fixed_f32 = sitk.Cast(fixed, sitk.sitkFloat32)
     moving_f32 = sitk.Cast(moving, sitk.sitkFloat32)
 
@@ -217,7 +265,7 @@ def multimodal_registration(fixed, moving, fixed_metric_mask=None):
         )
 
     def configure_bspline(registration):
-        transform_domain_mesh_size = [5] * fixed_f32.GetDimension()
+        transform_domain_mesh_size = [bspline_mesh_size] * fixed_f32.GetDimension()
         tx = sitk.BSplineTransformInitializer(fixed_f32, transform_domain_mesh_size)
         _configure_registration_method(registration, fixed_metric_mask)
         registration.SetInitialTransform(tx, inPlace=False)
@@ -225,13 +273,13 @@ def multimodal_registration(fixed, moving, fixed_metric_mask=None):
         registration.SetSmoothingSigmasPerLevel(smoothingSigmas=[2, 1, 0])
         registration.SetOptimizerAsGradientDescent(
             learningRate=0.0001,
-            numberOfIterations=25,
+            numberOfIterations=bspline_iterations,
             convergenceMinimumValue=1e-12,
             convergenceWindowSize=20,
         )
 
     def bspline_geometry_fallback():
-        transform_domain_mesh_size = [5] * fixed_f32.GetDimension()
+        transform_domain_mesh_size = [bspline_mesh_size] * fixed_f32.GetDimension()
         return sitk.BSplineTransformInitializer(fixed_f32, transform_domain_mesh_size)
 
     outTx2 = _execute_registration_stage(
@@ -340,6 +388,7 @@ def register_to_atlas(
     structure_map_path,
     fixed_keep_mask=None,
     moving_exclude_mask=None,
+    registration_quality=DEFAULT_REGISTRATION_QUALITY,
 ):
     """
     Register a section to the atlas using sitk.
@@ -355,6 +404,17 @@ def register_to_atlas(
         numpy.ndarray: The registered atlas image.
         numpy.ndarray: The color label image.
     """
+
+    preset = _resolve_registration_quality_preset(registration_quality)
+    working_size = preset["working_size"]
+    bspline_mesh_size = preset["bspline_mesh_size"]
+    bspline_iterations = preset["bspline_iterations"]
+    if perf_log.perf_enabled():
+        _emit_log(
+            f"align_register_quality registration_quality={registration_quality} "
+            f"working_size={working_size} bspline_mesh_size={bspline_mesh_size} "
+            f"bspline_iterations={bspline_iterations}"
+        )
 
     with perf_log.perf_section("align.register.load_structure_map"):
         with open(structure_map_path, "rb") as f:
@@ -373,9 +433,9 @@ def register_to_atlas(
         section_work[exclude] = 0
         label_work[exclude] = 0
 
-    tissue_resized = cv2.resize(tissue, (360, 360))
-    section_resized = cv2.resize(section_work, (360, 360))
-    label = resize_image_nearest_neighbor(label_work, (360, 360))
+    tissue_resized = cv2.resize(tissue, (working_size, working_size))
+    section_resized = cv2.resize(section_work, (working_size, working_size))
+    label = resize_image_nearest_neighbor(label_work, (working_size, working_size))
     fixed = sitk.GetImageFromArray(tissue_resized, isVector=False)
 
     fixed_metric_mask = None
@@ -387,7 +447,9 @@ def register_to_atlas(
                 (tissue.shape[1], tissue.shape[0]),
                 interpolation=cv2.INTER_NEAREST,
             )
-        keep_resized = cv2.resize(keep, (360, 360), interpolation=cv2.INTER_NEAREST)
+        keep_resized = cv2.resize(
+            keep, (working_size, working_size), interpolation=cv2.INTER_NEAREST
+        )
         fixed_metric_mask = _numpy_mask_to_sitk(keep_resized, fixed)
 
     # Vectorized layer-specific intensity adjustment
@@ -420,7 +482,13 @@ def register_to_atlas(
     # cast to float 32
     fixed = sitk.Cast(fixed, sitk.sitkFloat32)
     moving = sitk.Cast(moving, sitk.sitkFloat32)
-    tx = multimodal_registration(fixed, moving, fixed_metric_mask=fixed_metric_mask)
+    tx = multimodal_registration(
+        fixed,
+        moving,
+        fixed_metric_mask=fixed_metric_mask,
+        bspline_mesh_size=bspline_mesh_size,
+        bspline_iterations=bspline_iterations,
+    )
 
     resampler = sitk.ResampleImageFilter()
     resampler.SetReferenceImage(fixed)

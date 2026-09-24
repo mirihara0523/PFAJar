@@ -74,7 +74,7 @@ function handleAction(action, target) {
 			return;
 		}
 		if (!parentDir) {
-			alert("Choose a location to store your Mason Jar projects.");
+			alert("Choose a location to store your PFA Jar projects.");
 			return;
 		}
 		var resolved = project.resolveNewBundlePath(parentDir, name);

@@ -14,7 +14,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com; img-src 'self' file: data:;"
     />
-    <title>Semi-manual tissue edge cleanup — Mason Jar</title>
+    <title>Semi-manual tissue edge cleanup — PFA Jar</title>
     <link rel="stylesheet" href="../css/tissue_cleanup_wizard.css" />
   </head>
   <body class="wizard-page">
@@ -141,7 +141,16 @@
         </div>
         <p id="applyMessage" class="small text-muted"></p>
         <pre id="wizardLog" class="wizard-log border rounded p-2 small"></pre>
-        <button type="button" class="btn btn-outline-danger d-none" id="applyCancel">Cancel</button>
+        <p id="applyBackgroundNote" class="small text-muted mb-2">
+          Import continues in background. You can leave this screen (or work on another
+          project) and come back later to check progress — leaving does not stop the apply.
+        </p>
+        <div class="mt-3 d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-outline-danger d-none" id="applyCancel">Cancel</button>
+          <a class="btn btn-outline-secondary" id="step3BackToMenu" href="./menu.html">
+            Back to Main Menu
+          </a>
+        </div>
       </section>
 
       <section id="step4" class="wizard-panel d-none">

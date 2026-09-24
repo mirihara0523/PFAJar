@@ -1,4 +1,4 @@
-"""Vertical tile-seam correction for Mason Jar (preprocess step, image-only).
+"""Vertical tile-seam correction for PFA Jar (preprocess step, image-only).
 
 Detects a periodic vertical seam pattern left over from tile stitching
 (autocorrelation over the mean column-to-column gradient, restricted to
@@ -505,7 +505,17 @@ def correct(img8: np.ndarray, *, band: int = DEFAULT_BAND, tissue_threshold: int
             cur += steps[xs_sorted[xi]]
             xi += 1
         offset[x] = cur
-    offset -= np.median(offset)  # keep overall brightness anatomy-safe
+    # Same unnormalized-cumulative-sum pattern as correct_known_geometry()'s
+    # v_bounds/h_bounds handling above (see _detrend_offset()'s docstring):
+    # consistently one-signed per-seam steps (real per-tile vignetting, not
+    # a true stitching discontinuity) produce a near-linear ramp that plain
+    # median-centering leaves intact, showing up as the reported left-dark/
+    # right-bright artifact. Only meaningful with >=2 seams; a single seam
+    # can't be distinguished from a trend, so it keeps median-centering.
+    if len(xs_sorted) >= 2:
+        offset = _detrend_offset(offset)
+    else:
+        offset -= np.median(offset)  # keep overall brightness anatomy-safe
 
     out = img - offset[None, :]
     out = np.clip(out, 0, 255)
@@ -941,6 +951,41 @@ def _axis_offset(
     return (offset, steps) if return_details else offset
 
 
+def _detrend_offset(offset: np.ndarray) -> np.ndarray:
+    """Remove the best-fit linear component from a cumulative offset curve.
+
+    _axis_offset() accumulates each boundary's local step left-to-right
+    with no normalization; correct_known_geometry() previously only
+    subtracted the median afterward. Median-centering removes the offset
+    curve's constant (DC) term but leaves any linear slope fully intact --
+    when the per-boundary steps returned by estimate_step() are
+    consistently one-signed (real-world tile vignetting rather than a true
+    stitching seam looks exactly like this: every tile boundary measures
+    "right side a bit brighter than left side" by nearly the same amount),
+    the cumulative sum is a near-perfect ramp, and centering it just turns
+    a one-directional ramp into a symmetric one -- left tiles get darkened,
+    right tiles get brightened by an equal and opposite amount, which is
+    the reported "seam correction makes the left dark / right bright"
+    symptom. Confirmed against a real recorded seamgrid (2026-09-18,
+    oriented-seam-review.json / 202607.M554.M579.01.63-64): vertical steps
+    of +20.6/+21.8/+20.8/+22.3/+21.5 across 5 independent boundaries --
+    consistent to within ~2 gray levels, i.e. not measurement noise --
+    produced a ~107-gray-level end-to-end ramp after median-centering.
+
+    A degree-1 least-squares fit removes both the slope and the intercept
+    in one step (so this replaces the median subtraction, not supplements
+    it), leaving genuine *local* seam corrections -- steps that don't all
+    point the same way -- untouched. Only used with >=2 boundaries; with
+    0 or 1, "linear trend across boundaries" isn't a meaningful concept
+    (a single step is either a real seam or it isn't -- there's nothing to
+    distinguish it from a trend), so the caller keeps the existing
+    median-centering for those cases.
+    """
+    x = np.arange(offset.shape[0], dtype=np.float64)
+    slope, intercept = np.polyfit(x, offset.astype(np.float64), 1)
+    return (offset - (slope * x + intercept)).astype(np.float32)
+
+
 def correct_known_geometry(
     img8: np.ndarray,
     grid: dict,
@@ -986,9 +1031,13 @@ def correct_known_geometry(
     v_tiles = _tile_intervals(v_bounds, w)
     h_tiles = _tile_intervals(h_bounds, h)
 
-    if v_bounds:
+    if len(v_bounds) >= 2:
+        col_off = _detrend_offset(col_off)
+    elif v_bounds:
         col_off = col_off - np.median(col_off)  # keep overall brightness anatomy-safe
-    if h_bounds:
+    if len(h_bounds) >= 2:
+        row_off = _detrend_offset(row_off)
+    elif h_bounds:
         row_off = row_off - np.median(row_off)
 
     def step_diagnostics(steps):

@@ -1101,6 +1101,12 @@ document.getElementById("step2Apply").addEventListener("click", runApply);
 document.getElementById("applyCancel").addEventListener("click", function () {
 	ipc.send("killTissueCleanup");
 });
+var step3BackToMenuBtn = document.getElementById("step3BackToMenu");
+if (step3BackToMenuBtn) {
+	step3BackToMenuBtn.addEventListener("click", function () {
+		appendLog("[TissueCleanup] Leaving apply screen; apply continues in background.");
+	});
+}
 
 window.addEventListener("resize", function () {
 	canvas.fitToViewport();

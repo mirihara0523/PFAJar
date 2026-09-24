@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pipeline_io_bootstrap  # noqa: F401
 
-from apply_geometry import compose_ops_from_spec
+from geometry_ops import compose_ops_from_spec
 from czi_common import CANONICAL_REL, emit_log, emit_result, load_import_config
 from geometry_orientation_match import downsample_plane, probe_slice_channels, read_preview_plane
 

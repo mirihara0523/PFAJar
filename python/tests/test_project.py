@@ -1,4 +1,4 @@
-"""Tests for Mason Jar / Bell Jar project bundle schema and I/O."""
+"""Tests for PFA Jar / Bell Jar project bundle schema and I/O."""
 
 from __future__ import annotations
 

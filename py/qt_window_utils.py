@@ -1,4 +1,4 @@
-"""Helpers to raise/activate top-level Qt windows so Mason Jar tools come to front.
+"""Helpers to raise/activate top-level Qt windows so PFA Jar tools come to front.
 
 Used by ``adjust.py`` (PyQt) and ``map.py`` (Napari / Qt) after ``show()``.
 

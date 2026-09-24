@@ -1,4 +1,4 @@
-"""Bell Jar parity tests for Mason Jar sharpen core."""
+"""Bell Jar parity tests for PFA Jar sharpen core."""
 
 from __future__ import annotations
 

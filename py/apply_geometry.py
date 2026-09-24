@@ -25,106 +25,31 @@ from geometry_apply_progress import (
 )
 from geometry_history import append_geometry_history, ops_to_js_list
 
+# Local mirror of align_tissue_mask.archive_mask_path()/_meta_dir() path
+# resolution -- duplicated (not imported) so this module does not pick up
+# align_tissue_mask.py's scikit-image dependency just to resolve a path.
+# Keep in sync with align_tissue_mask.py if that resolution logic changes.
+def _tissue_cleanup_mask_path(bundle_root: Path, slice_id: str) -> Path:
+    for name in (".masonjar", ".belljar"):
+        meta_dir = bundle_root / name
+        if meta_dir.is_dir():
+            return meta_dir / "tissue_cleanup_masks" / f"{slice_id}.png"
+    return bundle_root / ".masonjar" / "tissue_cleanup_masks" / f"{slice_id}.png"
 
-def compose_ops(rotate: int, flip_x: bool, flip_y: bool):
-    ops = []
-    rot = int(rotate or 0) % 360
-    if rot in (90, 180, 270):
-        ops.append(("rotate", rot))
-    if flip_x:
-        ops.append(("flip_x", True))
-    if flip_y:
-        ops.append(("flip_y", True))
-    return ops
-
-
-def ops_from_string_list(op_list: list) -> list:
-    """Map JS geometry.ops entries (rot90, flipX, flipY) to internal op tuples."""
-    ops: list = []
-    for entry in op_list or []:
-        if entry == "rot90":
-            ops.append(("rotate", 90))
-        elif entry == "flipX":
-            ops.append(("flip_x", True))
-        elif entry == "flipY":
-            ops.append(("flip_y", True))
-    return ops
-
-
-def compose_ops_from_spec(spec: dict) -> list:
-    """Use ordered spec.ops when present; else legacy rotate/flip flags."""
-    if not spec:
-        return []
-    raw_ops = spec.get("ops")
-    if raw_ops:
-        return ops_from_string_list(raw_ops)
-    return compose_ops(spec.get("rotate", 0), spec.get("flipX"), spec.get("flipY"))
-
-
-def apply_ops_to_array(arr: np.ndarray, ops: list) -> np.ndarray:
-    # Rotation k matches CSS clockwise in js/orient_geometry.js geometryCssTransform.
-    out = arr
-    for op, val in ops:
-        if op == "rotate":
-            if val == 90:
-                out = np.rot90(out, k=-1)
-            elif val == 180:
-                out = np.rot90(out, k=2)
-            elif val == 270:
-                out = np.rot90(out, k=1)
-        elif op == "flip_x":
-            out = np.fliplr(out)
-        elif op == "flip_y":
-            out = np.flipud(out)
-    return out
-
-
-def _read_tiff_array(path: Path) -> np.ndarray:
-    """Read TIFF via TiffFile (path-based; avoids io_fairshare BytesIO on large NAS files)."""
-    with tiff.TiffFile(str(path)) as tf:
-        pages = tf.pages
-        if not pages:
-            raise ValueError(f"No TIFF pages in {path.name}")
-        if len(pages) == 1:
-            return np.asarray(pages[0].asarray())
-        planes = [np.asarray(p.asarray()) for p in pages]
-        return np.stack(planes, axis=0)
-
-
-def _write_tiff_array(path: Path, arr: np.ndarray) -> None:
-    # Keep z-stacks (original_scans) compressed to match czi_extract and stop a
-    # geometry apply from re-inflating them; leave 03_max uncompressed so
-    # grayscale_load's memmap ROI fast-path (sharpen/tophat/basic) still works.
-    # zlib is lossless — pixel values are unchanged. Falls back to uncompressed
-    # on older tifffile that lacks the compression kwarg.
-    parts = {p.lower() for p in path.parts}
-    compress = "original_scans" in parts and "03_max" not in parts
-    if compress:
-        try:
-            tiff.imwrite(str(path), arr, photometric="minisblack", compression="zlib")
-            return
-        except (TypeError, ValueError):
-            pass
-    tiff.imwrite(str(path), arr, photometric="minisblack")
-
-
-def _read_image_array(path: Path) -> np.ndarray:
-    if path.suffix.lower() == ".png":
-        img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-        if img is None:
-            raise ValueError(f"Could not read {path}")
-        return np.asarray(img)
-    return _read_tiff_array(path)
-
-
-def _write_image_array(path: Path, arr: np.ndarray) -> None:
-    parts = {p.lower() for p in path.parts}
-    if "00_dapi" in parts and path.suffix.lower() != ".png":
-        raise ValueError(f"00_dapi accepts PNG only, not {path}")
-    if path.suffix.lower() == ".png":
-        cv2.imwrite(str(path), arr)
-        return
-    _write_tiff_array(path, arr)
+# Rotate/flip composition and TIFF/PNG array I/O moved to geometry_ops.py so
+# czi_extract.py (planned — see handoffs/design-docs/inline-geometry-extract-design.md)
+# and the other geometry_* scripts can reuse them without importing this
+# CLI/argparse module. Re-exported here unchanged for existing callers/tests.
+from geometry_ops import (  # noqa: F401
+    _read_image_array,
+    _read_tiff_array,
+    _write_image_array,
+    _write_tiff_array,
+    apply_ops_to_array,
+    compose_ops,
+    compose_ops_from_spec,
+    ops_from_string_list,
+)
 
 
 def transform_file(path: Path, ops: list) -> tuple[np.ndarray, np.ndarray]:
@@ -256,6 +181,22 @@ def collect_geometry_jobs(
                 reextract_scope,
                 cfg,
             )
+        else:
+            # Keep the archived tissue-cleanup keep-mask oriented with the
+            # rest of this slice. It is a `.masonjar/` sidecar, not a
+            # pipeline data file, so paths_for_slice() does not return it --
+            # but Alignment reads it as-is (align_tissue_mask.load_keep_mask
+            # -> map.py, un-oriented) and warps against the now-transformed
+            # tissue image, so an un-rotated/un-flipped mask silently
+            # drifts out of alignment with the image it is meant to mask.
+            # Skipped for reextract-scope-limited jobs: those catch up a
+            # narrow set of re-extracted files with ops already applied to
+            # the rest of the slice in an earlier full pass, where the mask
+            # (if any) was already oriented correctly -- re-transforming it
+            # here would double-apply the ops.
+            mask_path = _tissue_cleanup_mask_path(bundle_root, slice_id)
+            if mask_path.is_file():
+                targets.append(mask_path)
         if targets:
             jobs.append((slice_id, ops, targets))
     return jobs

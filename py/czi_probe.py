@@ -59,7 +59,7 @@ def probe_file(path: Path) -> dict:
         from aicspylibczi import CziFile
     except ImportError as exc:
         raise RuntimeError(
-            "aicspylibczi is not installed in the Mason Jar Python environment"
+            "aicspylibczi is not installed in the PFA Jar Python environment"
         ) from exc
 
     t0 = time.monotonic()

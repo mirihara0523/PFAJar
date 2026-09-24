@@ -132,7 +132,7 @@ function populateConsentModalBody(modalEl) {
 		renderListItems(CAVEATS.unavailable) +
 		"</ul></div></div>" +
 		'<p class="small text-muted text-start mt-3 mb-0">' +
-		'Prefer full Mason Jar features? ' +
+		'Prefer full PFA Jar features? ' +
 		'<a href="./project_wizard.html?mode=migrate">Migrate to a .masonjar project</a> instead.' +
 		"</p>";
 }

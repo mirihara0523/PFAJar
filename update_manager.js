@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UpdateManager = exports.buildCheckResult = exports.expectedWindowsZipName = exports.resolveInstallRoot = exports.isUpdateInProgress = exports.isApplyScriptRunning = exports.buildApplySpawnCommand = exports.CLOSE_OTHER_INSTANCES_MESSAGE = exports.deleteInstallVersionBackups = exports.listInstallVersionBackups = exports.versionBackupDirName = exports.refreshUpdateLockState = exports.writeUpdateLock = exports.releaseUpdateLock = exports.clearOrphanUpdateLock = exports.clearStaleUpdateLock = exports.pathsEqualIgnoreCase = exports.isActiveUpdateLock = exports.isProcessAlive = exports.readUpdateLock = exports.isUpdateLockStale = exports.appendUpdateLogLine = exports.UPDATE_LOCK_STALE_MS = exports.updateFallbackLogPath = exports.updateLogPath = exports.updateLockPath = exports.masonJarTempRoot = exports.countOtherMasonJarInstances = exports.listMasonJarProcesses = exports.countOtherMasonJarInstancesFromList = exports.isElectronHelperProcess = exports.isMandatoryUpdateRequired = exports.compareUpdateAvailable = exports.pickBestRelease = exports.releaseSemver = exports.pickWindowsZipAsset = exports.releaseNotesExcerpt = exports.saveUpdatePreferences = exports.loadUpdatePreferences = exports.updatePreferencesPath = exports.GITHUB_REPO = void 0;
+exports.UpdateManager = exports.buildCheckResult = exports.expectedWindowsZipName = exports.resolveInstallRoot = exports.isUpdateInProgress = exports.isApplyScriptRunning = exports.buildApplySpawnCommand = exports.CLOSE_OTHER_INSTANCES_MESSAGE = exports.deleteInstallVersionBackups = exports.listInstallVersionBackups = exports.versionBackupDirName = exports.refreshUpdateLockState = exports.writeUpdateLock = exports.releaseUpdateLock = exports.clearOrphanUpdateLock = exports.clearStaleUpdateLock = exports.pathsEqualIgnoreCase = exports.isActiveUpdateLock = exports.isProcessAlive = exports.readUpdateLock = exports.isUpdateLockStale = exports.appendUpdateLogLine = exports.UPDATE_LOCK_STALE_MS = exports.updateFallbackLogPath = exports.updateLogPath = exports.updateLockPath = exports.masonJarTempRoot = exports.countOtherPFAJarInstances = exports.listPFAJarProcesses = exports.countOtherPFAJarInstancesFromList = exports.isElectronHelperProcess = exports.isMandatoryUpdateRequired = exports.compareUpdateAvailable = exports.pickBestRelease = exports.releaseSemver = exports.pickWindowsZipAsset = exports.releaseNotesExcerpt = exports.saveUpdatePreferences = exports.loadUpdatePreferences = exports.updatePreferencesPath = exports.GITHUB_REPO = void 0;
 const fs_1 = __importDefault(require("fs"));
 const os_1 = __importDefault(require("os"));
 const path_1 = __importDefault(require("path"));
@@ -22,7 +22,7 @@ const semver = require("semver");
 const serverFetch = require("node-fetch");
 // Custom builds never check automatically, but an explicit Settings request
 // checks this fork's releases rather than the upstream project.
-exports.GITHUB_REPO = "mirihara0523-hue/masonjar";
+exports.GITHUB_REPO = "mirihara0523/PFAJar";
 const DEFAULT_PREFS = {
     allow_prerelease: false,
     keep_version_backups: false,
@@ -142,7 +142,7 @@ function isElectronHelperProcess(proc) {
     return /\s--type=/i.test(cmd);
 }
 exports.isElectronHelperProcess = isElectronHelperProcess;
-function countOtherMasonJarInstancesFromList(processes, myPid, installRoot) {
+function countOtherPFAJarInstancesFromList(processes, myPid, installRoot) {
     const rootNorm = installRoot
         ? path_1.default.normalize(installRoot).replace(/\\/g, "/").toLowerCase()
         : "";
@@ -180,8 +180,8 @@ function countOtherMasonJarInstancesFromList(processes, myPid, installRoot) {
     }
     return count;
 }
-exports.countOtherMasonJarInstancesFromList = countOtherMasonJarInstancesFromList;
-function listMasonJarProcessesWindows() {
+exports.countOtherPFAJarInstancesFromList = countOtherPFAJarInstancesFromList;
+function listPFAJarProcessesWindows() {
     try {
         const script = "Get-CimInstance Win32_Process -Filter \"Name='masonjar.exe'\" | " +
             "Select-Object ProcessId, ExecutablePath, CommandLine | ConvertTo-Json -Compress";
@@ -208,7 +208,7 @@ function listMasonJarProcessesWindows() {
         return [];
     }
 }
-function listMasonJarProcessesDarwin() {
+function listPFAJarProcessesDarwin() {
     try {
         // PID + full args so we can skip Electron --type= helpers.
         const out = (0, child_process_1.execSync)("ps -axo pid=,command= | grep -i '[m]asonjar' || true", {
@@ -249,22 +249,22 @@ function listMasonJarProcessesDarwin() {
         return [];
     }
 }
-function listMasonJarProcesses() {
+function listPFAJarProcesses() {
     if (process.platform === "win32") {
-        return listMasonJarProcessesWindows();
+        return listPFAJarProcessesWindows();
     }
     if (process.platform === "darwin") {
-        return listMasonJarProcessesDarwin();
+        return listPFAJarProcessesDarwin();
     }
     return [];
 }
-exports.listMasonJarProcesses = listMasonJarProcesses;
-function countOtherMasonJarInstances(installRoot, myPid = process.pid, listProcesses = listMasonJarProcesses) {
-    return countOtherMasonJarInstancesFromList(listProcesses(), myPid, installRoot);
+exports.listPFAJarProcesses = listPFAJarProcesses;
+function countOtherPFAJarInstances(installRoot, myPid = process.pid, listProcesses = listPFAJarProcesses) {
+    return countOtherPFAJarInstancesFromList(listProcesses(), myPid, installRoot);
 }
-exports.countOtherMasonJarInstances = countOtherMasonJarInstances;
+exports.countOtherPFAJarInstances = countOtherPFAJarInstances;
 function masonJarTempRoot() {
-    return path_1.default.join(os_1.default.tmpdir(), "MasonJar");
+    return path_1.default.join(os_1.default.tmpdir(), "PFAJar");
 }
 exports.masonJarTempRoot = masonJarTempRoot;
 function updateLockPath() {
@@ -505,7 +505,7 @@ function deleteInstallVersionBackups(installRoot) {
     return { ok: errors.length === 0, deleted, errors };
 }
 exports.deleteInstallVersionBackups = deleteInstallVersionBackups;
-exports.CLOSE_OTHER_INSTANCES_MESSAGE = "Please close all other running instances of Mason Jar before updating.";
+exports.CLOSE_OTHER_INSTANCES_MESSAGE = "Please close all other running instances of PFA Jar before updating.";
 function buildApplySpawnCommand(scriptPath) {
     // Break away from Electron's Windows Job Object via `cmd /c start` so the
     // apply script survives app.quit(). The short-lived cmd PID is not the apply
@@ -638,7 +638,7 @@ class UpdateManager {
             const prefs = allowPrerelease != null
                 ? { allow_prerelease: !!allowPrerelease }
                 : this.getPreferences();
-            const userAgent = `MasonJar/${this.currentVersion}`;
+            const userAgent = `PFAJar/${this.currentVersion}`;
             try {
                 let release = null;
                 if (prefs.allow_prerelease) {
@@ -680,7 +680,7 @@ class UpdateManager {
     }
     checkLatestStableRelease() {
         return __awaiter(this, void 0, void 0, function* () {
-            const userAgent = `MasonJar/${this.currentVersion}`;
+            const userAgent = `PFAJar/${this.currentVersion}`;
             try {
                 const url = `https://api.github.com/repos/${exports.GITHUB_REPO}/releases/latest`;
                 const res = yield fetchJson(url, userAgent);
@@ -977,7 +977,7 @@ function Wait-InstallProcesses {
   }
   $still = Get-InstallProcesses
   if ($still -and $still.Count -gt 0) {
-    throw "Mason Jar is still running after waiting 5 minutes; aborting update to avoid replacing files in use. Close all instances and try again."
+    throw "PFA Jar is still running after waiting 5 minutes; aborting update to avoid replacing files in use. Close all instances and try again."
   }
   Start-Sleep -Seconds 2
 }
@@ -1093,7 +1093,7 @@ try {
     Write-Log 'Released update.lock before relaunch'
   }
 
-  Write-Log 'Relaunching Mason Jar'
+  Write-Log 'Relaunching PFA Jar'
   try {
     Start-Process -FilePath $ExePath -WorkingDirectory $InstallRoot
     Write-Log 'Relaunch via Start-Process succeeded'
@@ -1105,7 +1105,7 @@ try {
   Write-Log 'Apply update finished successfully'
 } catch {
   Write-Log "Apply update failed: $($_.Exception.Message)"
-  Write-Log "See update log for details. Re-open Mason Jar and try Update Now, or install the zip manually from GitHub."
+  Write-Log "See update log for details. Re-open PFA Jar and try Update Now, or install the zip manually from GitHub."
   exit 1
 } finally {
   if (Test-Path -LiteralPath $LockPath) {
@@ -1121,7 +1121,7 @@ try {
         if (!installRoot) {
             return { ok: true };
         }
-        const others = countOtherMasonJarInstances(installRoot);
+        const others = countOtherPFAJarInstances(installRoot);
         if (others > 0) {
             return { ok: false, error: exports.CLOSE_OTHER_INSTANCES_MESSAGE };
         }

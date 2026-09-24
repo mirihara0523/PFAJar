@@ -12,7 +12,7 @@ var cziImport = require("../js/czi_import");
 var pipelineRuns = require("../js/pipeline_runs");
 var project = require("../js/project");
 
-function testImportHandoffState() {
+async function testImportHandoffState() {
 	var bundle = helpers.tmpDir("mj-handoff-");
 	var roles = {
 		dapi: "data/counting/00_dapi",
@@ -67,6 +67,10 @@ function testImportHandoffState() {
 	fs.writeFileSync(path.join(alignDir, "Annotation_M528_s001.pkl"), "x");
 	projectJson.processing.active_runs.slices = "align/run_a";
 	project.setActiveProject(bundle, projectJson);
+	// The handoff state is memoized only for the current synchronous UI render
+	// burst.  Let that microtask expire before asserting a filesystem/project
+	// state change made by this test.
+	await Promise.resolve();
 	assert.ok(!importHandoff.shouldShowImportNextSteps(projectJson, null, bundle));
 
 	project.clearActiveProject();
@@ -75,11 +79,14 @@ function testImportHandoffState() {
 
 var tests = [testImportHandoffState];
 
-function runAll() {
+async function runAll() {
 	for (var i = 0; i < tests.length; i++) {
-		tests[i]();
+		await tests[i]();
 	}
 	console.log("test-import-handoff.js: OK (" + tests.length + " tests)");
 }
 
-runAll();
+runAll().catch(function (err) {
+	console.error(err);
+	process.exitCode = 1;
+});

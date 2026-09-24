@@ -1,4 +1,4 @@
-"""Per-slice tissue edge masking for Mason Jar bundles."""
+"""Per-slice tissue edge masking for PFA Jar bundles."""
 
 from __future__ import annotations
 
@@ -629,7 +629,7 @@ def run_apply(args) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Tissue edge cleanup masks for Mason Jar")
+    parser = argparse.ArgumentParser(description="Tissue edge cleanup masks for PFA Jar")
     parser.add_argument("--auto", action="store_true", help="Auto tissue mask on preview")
     parser.add_argument("--guided", action="store_true", help="Trace-guided GrabCut mask")
     parser.add_argument("--apply", action="store_true", help="Apply confirmed masks to bundle")

@@ -14,7 +14,7 @@
 
 잠금 파일 기준 npm ci 및 patch-package 적용 후 TypeScript 컴파일, Electron Forge Windows x64 package 수행. 소스의 out 폴더에서 완성된 패키지를 위 출력 경로로 이동했다. 업데이트 도구 호환용으로 resources/app/package.json을 실행본 루트에도 복사했다. 기존 실행본 파일을 복사해 조립한 것이 아니라 새 소스에서 패키징했다.
 
-빌드 도구 npm 10.9.2는 `D:\Claude\masonjar-build-tools\package\bin`에 있으며, 소스의 전체 개발 의존성 설치를 완료했다. MC_SOURCE_SETUP.md의 '컴파일 검증 패키지만 준비' 상태는 이 빌드 이전 기록이다.
+빌드에는 소스 폴더의 `node_modules`에 설치된 개발 의존성을 사용한다. 과거 `D:\Claude\masonjar-build-tools` 경로는 2026-09-23에 보관함으로 이동했으며 현재 빌드에는 사용하지 않는다.
 
 ## 확인
 

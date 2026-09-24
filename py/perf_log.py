@@ -1,4 +1,4 @@
-"""Lightweight, env-gated performance timing for Mason Jar pipeline steps.
+"""Lightweight, env-gated performance timing for PFA Jar pipeline steps.
 
 Enable by setting the environment variable ``MASONJAR_PERF=1`` (also accepts
 true/yes/on). All output is written to stdout as ``LOG: perf <label> <ms>``

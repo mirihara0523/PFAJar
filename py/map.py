@@ -87,7 +87,7 @@ from qt_window_utils import (
     resolve_napari_qt_window,
     show_napari_maximized_and_activate,
 )
-from align_finish_confirm import confirm_align_finish
+from align_finish_confirm import choose_registration_quality, confirm_align_finish
 import align_shortcuts
 
 # Shortcut-controllable alignment actions: (handler-method name, menu/dialog label).
@@ -598,6 +598,7 @@ class AtlasSlice:
         structure_map_path,
         bundle_root=None,
         structure_map=None,
+        registration_quality="standard",
     ):
         """
         Runs multi-modal registration between this atlas slice and the provided tissue section.
@@ -626,6 +627,7 @@ class AtlasSlice:
                 region_code=self.region,
                 structure_map=structure_map,
                 slice_id=slice_id,
+                registration_quality=registration_quality,
             )
             warp_meta["keep_mask_source"] = self.keep_mask_source
             return warped_labels, warped_atlas, color_label, warp_meta
@@ -637,6 +639,7 @@ class AtlasSlice:
             structure_map_path,
             fixed_keep_mask=None,
             moving_exclude_mask=damage_mask,
+            registration_quality=registration_quality,
         )
         warp_meta = {
             "tissue_mask_used": False,
@@ -644,6 +647,7 @@ class AtlasSlice:
             "keep_mask_source": None,
             "keep_components": 0,
             "damage_mask_applied": damage_mask is not None and bool(np.any(damage_mask)),
+            "registration_quality": registration_quality,
         }
         return warped_labels, warped_atlas, color_label, warp_meta
 
@@ -794,7 +798,7 @@ class AlignmentController:
             self.ap_position_spinbox.setRange(0, 1319)
         else:
             self.ap_position_spinbox.setRange(0, 528)
-        self.ap_position_spinbox.setSingleStep(10)
+        self.ap_position_spinbox.setSingleStep(5)
         # no decimal places
         self.ap_position_spinbox.setDecimals(0)
         self.ap_position_spinbox.setKeyboardTracking(False)
@@ -993,7 +997,7 @@ class AlignmentController:
         self._align_toolbar = None
         self._tuning_dock = None
         self._options_dock = None
-        self._options_settings = QtCore.QSettings("MasonJar", "MasonJar")
+        self._options_settings = QtCore.QSettings("PFAJar", "PFAJar")
 
         # One scroll area owns the whole right sidebar.  Separate Tuning and
         # Options docks made only the lower panel reliably scrollable when the
@@ -1225,7 +1229,7 @@ class AlignmentController:
     def _init_align_toolbar(self, qt_window):
         """Top toolbar: section info, nav, and flag."""
         self._align_toolbar = QToolBar("Alignment", qt_window)
-        self._align_toolbar.setObjectName("MasonJarAlignmentToolbar")
+        self._align_toolbar.setObjectName("PFAJarAlignmentToolbar")
         self._align_toolbar.setMovable(False)
         qt_window.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, self._align_toolbar)
 
@@ -1569,7 +1573,7 @@ class AlignmentController:
         arrange_right_docks_split(self.viewer, None, self._options_dock)
 
     def _show_align_chrome(self):
-        """Force Mason Jar docks visible; hide unused napari layer docks.
+        """Force PFA Jar docks visible; hide unused napari layer docks.
 
         The combined Tuning/Options sidebar lives on the right where the layer
         list and layer controls used to be.
@@ -2884,10 +2888,29 @@ class AlignmentController:
             parent = None
         return confirm_align_finish(parent)
 
+    def _choose_registration_quality(self):
+        """Ask which registration quality to warp every section with.
+
+        Returns "standard"/"precise", or None if the user cancelled --
+        Finish should abort on None, same as a cancelled _confirm_finish().
+        """
+        parent = None
+        try:
+            parent = resolve_napari_qt_window(self.viewer)
+        except Exception:
+            parent = None
+        return choose_registration_quality(
+            parent, default=getattr(self, "_registration_quality", "standard")
+        )
+
     def finish(self):
         """Finish alignment"""
         if not self._confirm_finish():
             return
+        registration_quality = self._choose_registration_quality()
+        if registration_quality is None:
+            return
+        self._registration_quality = registration_quality
         self._session_finished = True
         # disconnect signals
         self.x_angle_spinbox.valueChanged.disconnect(self.que_update_slice)
@@ -2904,7 +2927,7 @@ class AlignmentController:
         with perf_log.perf_section("align.finish.save_alignment"):
             self.save_alignment()
 
-        # Hand Mason Jar back immediately so users see warp progress (not a
+        # Hand PFA Jar back immediately so users see warp progress (not a
         # minimized window). Closing Napari is safe: _session_finished skips
         # the cancel / Viewer-closed handshake.
         print("ALIGN_WARPING", flush=True)
@@ -2981,6 +3004,7 @@ class AlignmentController:
                         self.structures_path,
                         bundle_root=self.bundle_root,
                         structure_map=structure_map,
+                        registration_quality=self._registration_quality,
                     )
             except Exception as exc:
                 err_msg = str(exc)
@@ -2990,6 +3014,7 @@ class AlignmentController:
                         "file": filename,
                         "error": err_msg,
                         "tissue_mask_warp_mode": warp_mode if use_mask else "standard",
+                        "registration_quality": self._registration_quality,
                     }
                 )
                 print(
@@ -3273,7 +3298,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-b",
         "--bundle",
-        help="Mason Jar bundle root (for tissue cleanup mask lookup)",
+        help="PFA Jar bundle root (for tissue cleanup mask lookup)",
         default="",
     )
     args = parser.parse_args()

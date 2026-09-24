@@ -52,7 +52,7 @@
 			require(path.join(jsDir, names[i]));
 		} catch (err) {
 			var msg =
-				"Mason Jar failed to load " +
+				"PFA Jar failed to load " +
 				names[i] +
 				":\n" +
 				(err && err.message ? err.message : String(err));

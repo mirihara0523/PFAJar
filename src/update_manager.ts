@@ -9,7 +9,7 @@ const serverFetch = require("node-fetch");
 
 // Custom builds never check automatically, but an explicit Settings request
 // checks this fork's releases rather than the upstream project.
-export const GITHUB_REPO = "mirihara0523-hue/masonjar";
+export const GITHUB_REPO = "mirihara0523/PFAJar";
 
 export interface UpdatePreferences {
   allow_prerelease: boolean;
@@ -193,7 +193,7 @@ export function isMandatoryUpdateRequired(
   return compareUpdateAvailable(currentVersion, result.latest);
 }
 
-export type MasonJarProcessInfo = {
+export type PFAJarProcessInfo = {
   pid: number;
   exePath: string;
   /** Full command line when available (used to skip Electron --type= helpers). */
@@ -201,13 +201,13 @@ export type MasonJarProcessInfo = {
 };
 
 /** Chromium/Electron child processes always carry --type=… on the command line. */
-export function isElectronHelperProcess(proc: MasonJarProcessInfo): boolean {
+export function isElectronHelperProcess(proc: PFAJarProcessInfo): boolean {
   const cmd = String(proc.commandLine || "");
   return /\s--type=/i.test(cmd);
 }
 
-export function countOtherMasonJarInstancesFromList(
-  processes: MasonJarProcessInfo[],
+export function countOtherPFAJarInstancesFromList(
+  processes: PFAJarProcessInfo[],
   myPid: number,
   installRoot?: string | null,
 ): number {
@@ -249,7 +249,7 @@ export function countOtherMasonJarInstancesFromList(
   return count;
 }
 
-function listMasonJarProcessesWindows(): MasonJarProcessInfo[] {
+function listPFAJarProcessesWindows(): PFAJarProcessInfo[] {
   try {
     const script =
       "Get-CimInstance Win32_Process -Filter \"Name='masonjar.exe'\" | " +
@@ -290,7 +290,7 @@ function listMasonJarProcessesWindows(): MasonJarProcessInfo[] {
   }
 }
 
-function listMasonJarProcessesDarwin(): MasonJarProcessInfo[] {
+function listPFAJarProcessesDarwin(): PFAJarProcessInfo[] {
   try {
     // PID + full args so we can skip Electron --type= helpers.
     const out = execSync(
@@ -303,7 +303,7 @@ function listMasonJarProcessesDarwin(): MasonJarProcessInfo[] {
     if (!out) {
       return [];
     }
-    const rows: MasonJarProcessInfo[] = [];
+    const rows: PFAJarProcessInfo[] = [];
     for (const line of out.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed) {
@@ -334,22 +334,22 @@ function listMasonJarProcessesDarwin(): MasonJarProcessInfo[] {
   }
 }
 
-export function listMasonJarProcesses(): MasonJarProcessInfo[] {
+export function listPFAJarProcesses(): PFAJarProcessInfo[] {
   if (process.platform === "win32") {
-    return listMasonJarProcessesWindows();
+    return listPFAJarProcessesWindows();
   }
   if (process.platform === "darwin") {
-    return listMasonJarProcessesDarwin();
+    return listPFAJarProcessesDarwin();
   }
   return [];
 }
 
-export function countOtherMasonJarInstances(
+export function countOtherPFAJarInstances(
   installRoot?: string | null,
   myPid: number = process.pid,
-  listProcesses: () => MasonJarProcessInfo[] = listMasonJarProcesses,
+  listProcesses: () => PFAJarProcessInfo[] = listPFAJarProcesses,
 ): number {
-  return countOtherMasonJarInstancesFromList(
+  return countOtherPFAJarInstancesFromList(
     listProcesses(),
     myPid,
     installRoot,
@@ -357,7 +357,7 @@ export function countOtherMasonJarInstances(
 }
 
 export function masonJarTempRoot(): string {
-  return path.join(os.tmpdir(), "MasonJar");
+  return path.join(os.tmpdir(), "PFAJar");
 }
 
 export function updateLockPath(): string {
@@ -615,7 +615,7 @@ export function deleteInstallVersionBackups(installRoot: string): {
 }
 
 export const CLOSE_OTHER_INSTANCES_MESSAGE =
-  "Please close all other running instances of Mason Jar before updating.";
+  "Please close all other running instances of PFA Jar before updating.";
 
 export function buildApplySpawnCommand(scriptPath: string): {
   command: string;
@@ -770,7 +770,7 @@ export class UpdateManager {
       allowPrerelease != null
         ? { allow_prerelease: !!allowPrerelease }
         : this.getPreferences();
-    const userAgent = `MasonJar/${this.currentVersion}`;
+    const userAgent = `PFAJar/${this.currentVersion}`;
 
     try {
       let release: GitHubRelease | null = null;
@@ -820,7 +820,7 @@ export class UpdateManager {
   }
 
   async checkLatestStableRelease(): Promise<UpdateCheckResult> {
-    const userAgent = `MasonJar/${this.currentVersion}`;
+    const userAgent = `PFAJar/${this.currentVersion}`;
     try {
       const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
       const res = await fetchJson<GitHubRelease>(url, userAgent);
@@ -1164,7 +1164,7 @@ function Wait-InstallProcesses {
   }
   $still = Get-InstallProcesses
   if ($still -and $still.Count -gt 0) {
-    throw "Mason Jar is still running after waiting 5 minutes; aborting update to avoid replacing files in use. Close all instances and try again."
+    throw "PFA Jar is still running after waiting 5 minutes; aborting update to avoid replacing files in use. Close all instances and try again."
   }
   Start-Sleep -Seconds 2
 }
@@ -1280,7 +1280,7 @@ try {
     Write-Log 'Released update.lock before relaunch'
   }
 
-  Write-Log 'Relaunching Mason Jar'
+  Write-Log 'Relaunching PFA Jar'
   try {
     Start-Process -FilePath $ExePath -WorkingDirectory $InstallRoot
     Write-Log 'Relaunch via Start-Process succeeded'
@@ -1292,7 +1292,7 @@ try {
   Write-Log 'Apply update finished successfully'
 } catch {
   Write-Log "Apply update failed: $($_.Exception.Message)"
-  Write-Log "See update log for details. Re-open Mason Jar and try Update Now, or install the zip manually from GitHub."
+  Write-Log "See update log for details. Re-open PFA Jar and try Update Now, or install the zip manually from GitHub."
   exit 1
 } finally {
   if (Test-Path -LiteralPath $LockPath) {
@@ -1313,7 +1313,7 @@ try {
     if (!installRoot) {
       return { ok: true };
     }
-    const others = countOtherMasonJarInstances(installRoot);
+    const others = countOtherPFAJarInstances(installRoot);
     if (others > 0) {
       return { ok: false, error: CLOSE_OTHER_INSTANCES_MESSAGE };
     }

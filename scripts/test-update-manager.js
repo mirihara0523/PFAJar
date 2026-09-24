@@ -399,12 +399,12 @@ function testIsMandatoryUpdateRequired() {
 
 function testCustomBuildUpdateDefaults() {
 	assert(
-		updateManager.GITHUB_REPO === "mirihara0523-hue/masonjar",
+		updateManager.GITHUB_REPO === "mirihara0523/PFAJar",
 		"manual update checks use the custom-build fork",
 	);
 }
 
-function testCountOtherMasonJarInstancesFromList() {
+function testCountOtherPFAJarInstancesFromList() {
 	const root = "C:\\Apps\\masonjar-win32-x64";
 	const list = [
 		{
@@ -424,15 +424,15 @@ function testCountOtherMasonJarInstancesFromList() {
 		},
 	];
 	assert(
-		updateManager.countOtherMasonJarInstancesFromList(list, 100, root) === 1,
+		updateManager.countOtherPFAJarInstancesFromList(list, 100, root) === 1,
 		"counts same-install-root excluding self",
 	);
 	assert(
-		updateManager.countOtherMasonJarInstancesFromList(list, 100, null) === 2,
+		updateManager.countOtherPFAJarInstancesFromList(list, 100, null) === 2,
 		"without install root counts all other mains",
 	);
 	assert(
-		updateManager.countOtherMasonJarInstancesFromList(list, 100, root) === 1,
+		updateManager.countOtherPFAJarInstancesFromList(list, 100, root) === 1,
 		"ignores different install root",
 	);
 
@@ -461,12 +461,12 @@ function testCountOtherMasonJarInstancesFromList() {
 		},
 	];
 	assert(
-		updateManager.countOtherMasonJarInstancesFromList(withHelpers, 100, root) ===
+		updateManager.countOtherPFAJarInstancesFromList(withHelpers, 100, root) ===
 			1,
 		"ignores Electron --type= helpers; counts second main",
 	);
 	assert(
-		updateManager.countOtherMasonJarInstancesFromList(
+		updateManager.countOtherPFAJarInstancesFromList(
 			[
 				{
 					pid: 100,
@@ -505,7 +505,7 @@ function run() {
 	testVersionBackupHelpers();
 	testIsMandatoryUpdateRequired();
 	testCustomBuildUpdateDefaults();
-	testCountOtherMasonJarInstancesFromList();
+	testCountOtherPFAJarInstancesFromList();
 	console.log("test-update-manager: ok");
 }
 

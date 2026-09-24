@@ -3010,6 +3010,12 @@ function bindStep4() {
 			setStep(5);
 		});
 	}
+	var backToMenuBtn = qs("step4BackToMenu");
+	if (backToMenuBtn) {
+		backToMenuBtn.addEventListener("click", function () {
+			verboseExtractLog("Leaving CZI import screen; extraction continues in background.");
+		});
+	}
 }
 
 function bindStep5() {

@@ -1,4 +1,4 @@
-# Mason Jar 7.0.2-MC.1 — Developer Handoff
+# PFA Jar 1.0.0 — Developer Handoff
 
 ## What to review
 
@@ -9,7 +9,7 @@ This source tree contains improvements made after the original 7.0.2 source/runt
 - Source: this folder.
 - Matching test runtime: `D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64`.
 - The test runtime is useful for immediate behavior review. It was updated through selective, SHA-256-verified synchronization during development.
-- A full Windows release package is available at `out\make\zip\win32\x64\masonjar-win32-x64-7.0.2-MC.1.zip`. Verify its SHA-256 immediately before transfer.
+- Build a Windows release package from this source when a distributable artifact is required. Verify its SHA-256 immediately before transfer.
 
 ## Important behavior decisions
 
@@ -17,7 +17,7 @@ This source tree contains improvements made after the original 7.0.2 source/runt
 - Preserve the entire filename stem, including periods, for all CZI-related file matching.
 - Prefer Known-geometry Seam Correction when seamgrid metadata exists; otherwise use Grid-estimated.
 - Adjustment Viewer Seam Correction is live. It should not depend on Process-generated correction PNG files.
-- Automatic and mandatory update checks are disabled for this custom build. A manual Settings > Updates check targets `mirihara0523-hue/masonjar` only.
+- Automatic and mandatory update checks are disabled for this custom build. A manual Settings > Updates check targets `mirihara0523/PFAJar` only.
 
 ## Before distribution
 

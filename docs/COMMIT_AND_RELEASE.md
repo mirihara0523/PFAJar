@@ -51,7 +51,7 @@ Add a section **before** `node scripts/publish-release.js`:
 
 **What's new**
 
-Two or three sentences a lab member can read without opening the repo. Describe what they can do differently in Mason Jar (tool names from the UI are fine).
+Two or three sentences a lab member can read without opening the repo. Describe what they can do differently in PFA Jar (tool names from the UI are fine).
 
 **Changes**
 

@@ -1,6 +1,6 @@
 """Project file management.
 
-Handles saving and loading Mason Jar / Bell Jar project state as JSON files,
+Handles saving and loading PFA Jar / Bell Jar project state as JSON files,
 replacing opaque pickle-based serialization.
 """
 
@@ -64,7 +64,7 @@ def bundle_root_from_path(path: Path) -> Path:
             return path
         if any(path.name.endswith(suffix) for suffix in BUNDLE_SUFFIXES):
             return path
-    raise FileNotFoundError(f"Not a Mason Jar project bundle: {path}")
+    raise FileNotFoundError(f"Not a PFA Jar project bundle: {path}")
 
 
 def project_file_path(bundle_root: Path) -> Path:

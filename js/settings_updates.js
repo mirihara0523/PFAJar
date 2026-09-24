@@ -6,7 +6,7 @@ var navTrail = require("./nav_trail");
 
 var LS_ALLOW_PRERELEASE = "masonjar.update.allowPrerelease";
 var LS_LAST_CHECKED_AT = "masonjar.update.lastCheckedAt";
-var UPDATE_REPOSITORY_URL = "https://github.com/mirihara0523-hue/masonjar";
+var UPDATE_REPOSITORY_URL = "https://github.com/mirihara0523/PFAJar";
 
 var state = {
 	cached: null,
@@ -122,7 +122,7 @@ function applyMandatoryLockUI() {
 		banner.textContent =
 			"Required update to version " +
 			(latest || "…") +
-			" — Mason Jar will download and install automatically.";
+			" — PFA Jar will download and install automatically.";
 	}
 	var advanced = qs("updateAdvancedPanel");
 	if (advanced) {
@@ -193,7 +193,7 @@ function renderVersionLabels() {
 			summary.textContent = "You're up to date.";
 		} else {
 			summary.textContent =
-				"No published releases found in mirihara0523-hue/masonjar.";
+				"No published releases found in mirihara0523/PFAJar.";
 		}
 	}
 	if (notesBlock && notesText) {
@@ -431,7 +431,7 @@ function onDeleteVersionBackupsClick() {
 function confirmUpdateNow() {
 	var cached = state.cached || {};
 	var lines = [
-		"Mason Jar will download the update, quit, and restart with version " +
+		"PFA Jar will download the update, quit, and restart with version " +
 			(cached.latest || "?") +
 			".",
 		"Finish or cancel any running pipeline jobs first.",
@@ -462,7 +462,7 @@ function runUpdateNowWithoutConfirm() {
 				renderActionButtons();
 				return ipc.invoke("getUpdateStatus");
 			}
-			setFeedback("Installing update… Mason Jar will restart.");
+			setFeedback("Installing update… PFA Jar will restart.");
 			setProgress(true, 100, "Installing update…");
 		})
 		.then(function (payload) {
@@ -505,7 +505,7 @@ function runMandatoryUpdateFlow() {
 		ipc.invoke("openExternalUrl", url);
 	}
 	setFeedback(
-		"Download and install the latest Mason Jar from GitHub, then reopen the app.",
+		"Download and install the latest PFA Jar from GitHub, then reopen the app.",
 		false,
 	);
 	setTimeout(function () {

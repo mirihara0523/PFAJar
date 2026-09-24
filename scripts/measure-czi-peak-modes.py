@@ -1,7 +1,7 @@
 """Measure exact versus sampled uint16 peak scans on one CZI channel.
 
 Read-only diagnostic: it never writes the project bundle or CZI source.  Run
-with Mason Jar's runtime Python so the installed aicspylibczi is used.
+with PFA Jar's runtime Python so the installed aicspylibczi is used.
 """
 from __future__ import annotations
 

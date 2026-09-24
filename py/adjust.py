@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 import argparse
 import os, sys
 import pickle
@@ -43,8 +44,8 @@ from qtpy.QtWidgets import (
     QShortcut,
     QSplitter,
 )
-from qtpy.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QBrush, QKeySequence, QTransform, QKeyEvent
-from qtpy.QtCore import Qt, QPoint, QPointF, QEvent, QTimer, QRectF, QSettings
+from qtpy.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QBrush, QKeySequence, QTransform, QKeyEvent, QCursor, QDrag
+from qtpy.QtCore import Qt, QPoint, QPointF, QEvent, QTimer, QRect, QRectF, QSettings, QMimeData
 from dialog_preferences import (
     KEY_CONFIRM_SAVE_OVERWRITE,
     KEY_ISOLATE_LABEL_AUDIT,
@@ -164,6 +165,192 @@ class FileSelector(QMainWindow):
         self.close()
 
 
+class _OptionsSectionsContainer(QWidget):
+    """Vertical, drag-reorderable stack of the Options sidebar's top-level
+    group sections (2026-09-19 user request, 2nd attempt). Ported from
+    py/map.py's ReorderableSidebarSections/DraggableSidebarSectionHeader,
+    which the user confirmed already works reliably in the Atlas Alignment
+    sidebar -- unlike the first attempt here (a QListWidget with each
+    section as a setItemWidget() row), which the user reported as
+    "bouncing"/glitching when reordering.
+
+    Unlike map.py's version (which builds header+content from raw widget
+    lists), each section here is already a complete, self-contained
+    QGroupBox with its own _DraggableGroupHeader inserted at layout index 0
+    by _make_group_collapsible() -- so this container only needs to track
+    section widgets by a stable key and reorder them via real Qt
+    QDrag/QMimeData drag-and-drop on its own dragEnterEvent/dragMoveEvent/
+    dropEvent, exactly as map.py's container does."""
+
+    MIME_TYPE = "application/x-masonjar-options-sidebar-section"
+
+    def __init__(self, viewer, parent=None):
+        super().__init__(parent)
+        self._viewer = viewer
+        self._sections = {}
+        self.setAcceptDrops(True)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(4)
+        # Absorb any leftover vertical space in the Options scroll area
+        # here instead of letting Qt spread it across the section widgets
+        # themselves (2026-09-19 user report: sections stretched taller
+        # than their actual content, both collapsed and expanded). Without
+        # a trailing stretch, QVBoxLayout distributes extra space to its
+        # children even at QSizePolicy.Preferred -- Preferred still allows
+        # growth when nothing else claims the space -- which is exactly
+        # what a tall, mostly-empty Options dock was doing to these five
+        # sections.
+        self._layout.addStretch(1)
+
+    def add_section(self, key: str, widget: QWidget):
+        self._sections[str(key)] = widget
+        # Vertical Fixed, not whatever the QGroupBox's own default policy
+        # is -- belt-and-suspenders alongside __init__'s trailing stretch
+        # (which already claims all leftover space on its own): this
+        # section can never grow past its actual content height either
+        # way. Qt re-queries sizeHint() (and so this Fixed size) whenever
+        # the layout is invalidated, which collapsing/expanding already
+        # triggers via _sync_options_list_heights()'s updateGeometry().
+        policy = widget.sizePolicy()
+        policy.setVerticalPolicy(QSizePolicy.Policy.Fixed)
+        widget.setSizePolicy(policy)
+        # Insert before the trailing stretch (always the layout's last
+        # item, see __init__) rather than appending, so new sections keep
+        # landing above the absorbed leftover space instead of after it.
+        self._layout.insertWidget(self._layout.count() - 1, widget)
+
+    def order(self):
+        result = []
+        for i in range(self._layout.count()):
+            item = self._layout.itemAt(i)
+            widget = item.widget() if item is not None else None
+            for key, candidate in self._sections.items():
+                if candidate is widget:
+                    result.append(key)
+                    break
+        return result
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(self.MIME_TYPE):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat(self.MIME_TYPE):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        if not event.mimeData().hasFormat(self.MIME_TYPE):
+            event.ignore()
+            return
+        key = bytes(event.mimeData().data(self.MIME_TYPE)).decode("utf-8")
+        dragged = self._sections.get(key)
+        if dragged is None:
+            event.ignore()
+            return
+        point = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        others = [k for k in self.order() if k != key]
+        insert_at = len(others)
+        for index, other_key in enumerate(others):
+            candidate = self._sections[other_key]
+            if point.y() < candidate.geometry().center().y():
+                insert_at = index
+                break
+        self._layout.removeWidget(dragged)
+        self._layout.insertWidget(insert_at, dragged)
+        event.acceptProposedAction()
+        if self._viewer is not None:
+            self._viewer._save_options_section_order(self)
+
+
+class _DraggableGroupHeader(QToolButton):
+    """A collapsible section header that can also be dragged to reorder its
+    section within the Options sidebar's _OptionsSectionsContainer
+    (2026-09-19 user request, 2nd attempt -- ported from py/map.py's
+    DraggableSidebarSectionHeader, which the user confirmed already works
+    reliably elsewhere in the app). Starts a real Qt QDrag carrying this
+    section's stable key as QMimeData, rather than the first attempt's
+    manual "move the row when the cursor crosses a neighboring midpoint"
+    tracking, which the user reported as bouncing/glitching.
+
+    A short move is still a plain click (toggles collapse, via the
+    QToolButton base class); only a move past
+    QApplication.startDragDistance() starts a drag, and starting one
+    suppresses the click-to-toggle that would otherwise fire on release."""
+
+    def __init__(self, *args, viewer=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._viewer = viewer
+        self._drag_start_pos = None
+        self._dragging = False
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.pos()
+            self._dragging = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_start_pos is not None and (event.buttons() & Qt.MouseButton.LeftButton):
+            moved = (event.pos() - self._drag_start_pos).manhattanLength()
+            if moved >= QApplication.startDragDistance():
+                self._drag_start_pos = None
+                self._dragging = True
+                # Clear the button's own pressed-down visual state before
+                # handing control to QDrag's blocking local event loop --
+                # otherwise, since the mouse is released somewhere outside
+                # this widget once the drag ends, QToolButton never gets
+                # its own mouseReleaseEvent to clear that state itself.
+                self.setDown(False)
+                group = self.parent()
+                key = group.property("sectionKey") if group is not None else None
+                container = getattr(self._viewer, "_options_sections_container", None)
+                if container is not None and key:
+                    drag = QDrag(self)
+                    mime = QMimeData()
+                    mime.setData(
+                        _OptionsSectionsContainer.MIME_TYPE,
+                        str(key).encode("utf-8"),
+                    )
+                    drag.setMimeData(mime)
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    drag.exec(Qt.DropAction.MoveAction)
+                    self.setCursor(Qt.CursorShape.OpenHandCursor)
+                    self.setDown(False)
+                self._dragging = False
+                return
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        was_dragging = self._dragging
+        self._dragging = False
+        self._drag_start_pos = None
+        if was_dragging:
+            # A QDrag already ran to completion; releasing must not also
+            # register as a click that toggles collapse.
+            return
+        super().mouseReleaseEvent(event)
+
+
+class _SignedSpinBox(QSpinBox):
+    """QSpinBox that always displays an explicit sign (+1, -1, ...).
+
+    Used for Compare Adjacent's slice offset (2026-09-22 user request): a
+    single signed-number control replaces the earlier Previous/Next
+    dropdown paired with a separate steps-away spinbox."""
+
+    def textFromValue(self, value: int) -> str:
+        return f"{value:+d}"
+
+    def valueFromText(self, text: str) -> int:
+        text = text.strip()
+        if not text or text in ("+", "-"):
+            return 0
+        return int(text)
+
+
 class AnnotationViewer(QMainWindow):
     def __init__(
         self,
@@ -215,8 +402,24 @@ class AnnotationViewer(QMainWindow):
         self._img_pixmap_item = None
         self._img_overlay_item = None
         self._anno_pixmap_item = None
+        # Compare Adjacent's own graphics item (2026-09-23), layered
+        # above _anno_pixmap_item -- see _set_compare_pixmap().
+        self._compare_pixmap_item = None
         self._syncing_scroll = False
         self._pan_scene_initialized = False
+        # Set for exactly one show_image_with_overlay() call by
+        # _load_section_at() when the newly loaded slice's image pixel
+        # size differs from the previously displayed slice's (2026-09-23
+        # user request: Next/Previous/Go to should recentre on the new
+        # image whenever its size differs, instead of carrying over the
+        # old slice's scrollbar pixel values, which show_image_with_
+        # overlay() otherwise always preserves verbatim -- correct for a
+        # same-size re-render (LUT/Seam/Refresh/Undo), but a stale,
+        # differently-scaled position for a genuine size change).
+        self._recenter_next_render = False
+        # Cached virtual-pan margins per pane (2026-09-19 user report: the slice still moved up/down on LUT slider drags and Seam Correction toggles even after the setSceneRect no-op guard). _lock_scene_rect_to_pixmap() previously recomputed these from view.viewport().size() on every single call; if the toolbar/sidebar's own layout is mid-pass (a label's text changed elsewhere in the same window, a style repolish, etc.) at the exact moment a LUT tick or Seam toggle re-renders, viewport().size() can transiently report a value a pixel or two off from its settled size, which the previous fix's rect-equality guard would treat as a genuine resize and let through. Caching removes viewport() from the hot render path entirely -- these only change on an explicit resize (splitter drag, zoom change), not on every render.
+        self._pan_margin_img = (64.0, 64.0)
+        self._pan_margin_anno = (64.0, 64.0)
         self._is_panning = False
         self._pan_last_pos = None
         self._space_pan_active = False
@@ -232,7 +435,7 @@ class AnnotationViewer(QMainWindow):
         self._dapi_prefetch_future = None
         self._dapi_prefetch_key = None
         self._dapi_prefetch_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="MasonJarDapiSeam"
+            max_workers=1, thread_name_prefix="PFAJarDapiSeam"
         )
         self._dapi_live_cache_tempdir = tempfile.TemporaryDirectory(
             prefix="masonjar-adjust-live-"
@@ -240,6 +443,70 @@ class AnnotationViewer(QMainWindow):
         self._save_exit_flag = self.images_dir / ".adjust_save_exit"
         self._save_exit_timer = QTimer(self)
         self._save_exit_timer.timeout.connect(self._poll_save_exit)
+        # Debounced (not one-shot-per-event) triggers for the Annotation map
+        # toggle / image splitter's virtual-pan refresh (2026-09-19 user
+        # report: rapid repeated clicking ("연타") on Annotation map still
+        # drifted the slice's position even after _refresh_virtual_pan_scene_rects()
+        # itself was fixed to preserve an unchanged view's exact scrollbar
+        # values). Root cause: each toggle queued its own fresh
+        # QTimer.singleShot(0, ...), so a rapid burst of clicks queued
+        # several of these back-to-back; between the moment one of them
+        # captures its "previous size/scrollbar" snapshot and the moment it
+        # actually applies centerOn(), a *later* queued call could already
+        # be mid-flight against the same views, so the "previous" state one
+        # callback restored was no longer actually the position the user's
+        # last click should have landed on. A restartable (debounced) timer
+        # collapses a whole rapid burst into exactly one refresh, run only
+        # after clicking actually stops, so there is only ever one
+        # snapshot-then-restore in flight at a time.
+        self._splitter_refresh_timer = QTimer(self)
+        self._splitter_refresh_timer.setSingleShot(True)
+        self._splitter_refresh_timer.timeout.connect(
+            self._refresh_virtual_pan_scene_rects
+        )
+        # 2026-09-23 user report (Region picker only, discovered right after
+        # the resize hook above was added for the pan-margin bug): on the
+        # very first slice, the Region picker's border was drawn too small
+        # and its bottom-most content (the resolution warning label, when
+        # visible) was clipped -- until Next reloaded the section, which
+        # fixed it. Same root cause as the pan-margin bug this timer already
+        # exists for: show_maximized_with_default_options_width()'s deferred
+        # resizeDocks() calls haven't settled the Options dock's final width
+        # yet when the section is first populated, so
+        # _update_paint_resolution_warning()'s _resize_paint_resolution_
+        # warning() call computes the warning label's setFixedHeight() (and
+        # so the whole Fixed-policy section's effective height/border) from
+        # a too-narrow pre-settle width. Nothing re-ran that computation
+        # once the dock actually reached its final width -- only the pan
+        # margins were wired to this debounced resize timer. Reusing it here
+        # closes that gap the same way, instead of adding a second, separate
+        # timer for what is really the same underlying race.
+        self._splitter_refresh_timer.timeout.connect(
+            self._update_paint_resolution_warning
+        )
+        self._splitter_reset_timer = QTimer(self)
+        self._splitter_reset_timer.setSingleShot(True)
+        self._splitter_reset_timer.timeout.connect(self._reset_image_splitter_equal)
+        # 2026-09-19 follow-up: the debounce above collapsed a rapid click
+        # burst down to one *callback*, but each click still synchronously
+        # flips anno_view.setVisible() right away (that part was never
+        # debounced), so a burst of N clicks still causes N real Qt resize
+        # events on img_view's viewport before the debounced correction
+        # ever runs once at the end. Whatever native anchor behavior Qt
+        # applies on each of those N raw resizes (typically re-centering on
+        # the viewport's *new* center, not preserving the *original* scene
+        # point) compounds across all N of them, and by the time
+        # _refresh_virtual_pan_scene_rects() finally fires it can only see
+        # the already-compounded result of the last resize -- there is no
+        # way to tell, from a live look at img_view alone, how much drift
+        # already accumulated from the N-1 earlier ones. Fix: capture the
+        # scene point that was actually centered *before the first click in
+        # a burst starts moving anything*, hold it here across the whole
+        # burst (the guard in _on_annotation_map_toggled only captures once
+        # per burst), and have _refresh_virtual_pan_scene_rects() re-target
+        # that original point instead of trusting whatever it can see live
+        # once the burst settles.
+        self._pending_pan_anchor: QPointF | None = None
         try:
             if self._save_exit_flag.is_file():
                 self._save_exit_flag.unlink()
@@ -312,6 +579,12 @@ class AnnotationViewer(QMainWindow):
         self.paint_swatch.setFixedSize(18, 18)
         self.paint_swatch.setFrameShape(QFrame.Shape.Box)
         self.paint_target_name = QLabel("None", self)
+        # Full anatomical name, shown on its own row below the swatch/acronym
+        # line (2026-09-18 user request) -- previously the full name was only
+        # reachable by hovering paint_target_name's tooltip.
+        self.paint_target_fullname = QLabel("", self)
+        self.paint_target_fullname.setWordWrap(True)
+        self.paint_target_fullname.setStyleSheet("color: #ffffff;")
         self.paint_tier_context = QLabel("", self)
         self.paint_adjust_badge = QLabel("OFF", self)
 
@@ -333,12 +606,56 @@ class AnnotationViewer(QMainWindow):
         self.brush_slider.setValue(self.brush_size)
         self.brush_slider.valueChanged.connect(self.update_brush)
 
+        # Brightness/contrast LUT for the background channel image
+        # (2026-09-18 user request). Applied on top of the already
+        # percentile-stretched 8-bit preview PNG -- a palette-style remap,
+        # not a recovery of clipped dynamic range. lut_black/lut_white are
+        # 0-255 input cutoffs; lut_gamma is gamma*100 (100 == 1.00, linear)
+        # so the slider can stay an int QSlider like the others.
+        self.lut_black = 0
+        self.lut_white = 255
+        self.lut_gamma = 100
+        self._active_channel_array = None
+
+        self.lut_black_label = QLabel("Black 0", self)
+        self.lut_black_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lut_black_slider.setRange(0, 254)
+        self.lut_black_slider.setValue(self.lut_black)
+        self.lut_black_slider.valueChanged.connect(self._on_lut_black_changed)
+
+        self.lut_white_label = QLabel("White 255", self)
+        self.lut_white_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lut_white_slider.setRange(1, 255)
+        self.lut_white_slider.setValue(self.lut_white)
+        self.lut_white_slider.valueChanged.connect(self._on_lut_white_changed)
+
+        self.lut_gamma_label = QLabel("Gamma 1.00", self)
+        self.lut_gamma_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lut_gamma_slider.setRange(10, 300)
+        self.lut_gamma_slider.setValue(self.lut_gamma)
+        self.lut_gamma_slider.valueChanged.connect(self._on_lut_gamma_changed)
+
+        self.lut_reset_button = QPushButton("Reset", self)
+        self.lut_reset_button.setToolTip("Reset black/white/gamma to identity (0 / 255 / 1.00)")
+        self.lut_reset_button.clicked.connect(self._reset_lut)
+
+        self.lut_auto_button = QPushButton("Auto", self)
+        self.lut_auto_button.setToolTip(
+            "Set black/white from the 1st/99th percentile of this channel's "
+            "tissue pixels (background excluded), and gamma from where the "
+            "tissue's median brightness falls in that range."
+        )
+        self.lut_auto_button.clicked.connect(self._auto_lut)
+
         # A shared label column keeps all sliders aligned even as
         # Zoom/Brush text changes with their current values.
         for slider_label in (
             self.opacity_label,
             self.zoom_label,
             self.brush_label,
+            self.lut_black_label,
+            self.lut_white_label,
+            self.lut_gamma_label,
         ):
             slider_label.setFixedWidth(88)
 
@@ -371,7 +688,7 @@ class AnnotationViewer(QMainWindow):
         self._brush_cursor_anno.setZValue(1000)
         self._brush_cursor_anno.setVisible(False)
         self.anno_scene.addItem(self._brush_cursor_anno)
-        # Brush ring cursor appearance (configurable in Brush & edits panel).
+        # Brush ring cursor appearance (configurable in the Brush panel).
         # Default to a high-contrast color for visibility over any background.
         self.brush_cursor_color = QColor("#FFFF00")
         self.brush_cursor_width = 3
@@ -390,6 +707,40 @@ class AnnotationViewer(QMainWindow):
 
         self.is_drawing = False
         self.last_draw_point = None
+        # Compare Adjacent (2026-09-22 user request): temporarily shows an
+        # adjacent slice's DAPI in the Annotation pane for visual
+        # comparison, read-only. See _enter_compare_mode()/_exit_compare_mode().
+        self._compare_mode_active = False
+        # Cached label array for the slice currently shown in the
+        # comparison pane, so a right-click there can pick from *that*
+        # slice's annotation instead of the current slice's (2026-09-22
+        # user request). None whenever compare mode is off or the
+        # adjacent slice has no loadable annotation.
+        self._compare_adjacent_label_array = None
+        # Where _enter_compare_mode() actually drew the adjacent picture
+        # inside its (possibly padded/centered) compare canvas, and that
+        # picture's own native (pre-padding) size -- both needed by
+        # _select_paint_target_at_view_pos() to map a click back into
+        # _compare_adjacent_label_array's coordinates and to reject a
+        # click that landed on the black padding margin instead of the
+        # actual picture (2026-09-23 user report: a right-click that
+        # visibly hit nothing was still silently resolving to *some*
+        # region, because that coordinate math had not been updated when
+        # the picture stopped being scaled to fill the whole canvas).
+        self._compare_pixmap_offset = (0, 0)
+        self._compare_pixmap_native_size = (0, 0)
+        # Whether _enter_compare_mode() forced the Annotation map pane
+        # visible because it was hidden (2026-09-22 user request); if so,
+        # _exit_compare_mode() hides it again on the way out.
+        self._compare_prev_annotation_map_checked = None
+        # Slice id that _compare_adjacent_label_array belongs to, for a
+        # confirmation message on right-click pick (2026-09-23).
+        self._compare_adjacent_slice_id = None
+        # Region picker: which of Search/Area currently has a
+        # click-triggered select-all pending (2026-09-22, see eventFilter's
+        # FocusIn/MouseButtonPress handling for area_search_box/
+        # area_combo.lineEdit() below).
+        self._region_picker_pending_select_all = set()
         # Cached overlay RGBA for incremental stroke updates (avoids a full-frame
         # rebuild on every brush release). _stroke_bbox tracks the changed region.
         self._anno_rgba = None
@@ -418,17 +769,32 @@ class AnnotationViewer(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
             | QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
+        self._options_settings = QSettings("PFAJar", "PFAJar")
         options_inner = QWidget(self)
         options_layout = QVBoxLayout()
         options_layout.setContentsMargins(4, 4, 4, 4)
         self._init_paint_controls(options_layout)
         self._init_parcellation_controls(options_layout)
+        # Replace the plain top-to-bottom stack with a drag-reorderable
+        # _OptionsSectionsContainer (2026-09-19 user request: let the
+        # Options sidebar's main sections be rearranged by dragging, and
+        # remember the arrangement; ported from py/map.py's proven
+        # ReorderableSidebarSections after a first QListWidget-based
+        # attempt bounced/glitched). Only reparents the group boxes
+        # already built above; every self.xxx widget reference is
+        # unaffected.
+        options_layout.addWidget(self._wrap_options_sections_reorderable(options_layout))
         options_inner.setLayout(options_layout)
+        self._options_inner = options_inner
         # Keep the full option stack as the scroll area's content size. Without
         # an explicit minimum height, a floating/narrow dock can compress the
         # child widget and Qt incorrectly concludes that no vertical overflow
         # exists, leaving the Display section clipped with no scrollbar.
-        options_inner.setMinimumHeight(options_layout.sizeHint().height())
+        # _sync_options_list_heights() nudges the reorderable container's
+        # own sizeHint (which now tracks its visible children automatically)
+        # through to this scroll area on every collapse/expand, rather than
+        # the one-time options_layout.sizeHint() this replaced.
+        self._sync_options_list_heights()
         options_scroll = QScrollArea(self)
         options_scroll.setWidgetResizable(True)
         options_scroll.setVerticalScrollBarPolicy(
@@ -440,7 +806,6 @@ class AnnotationViewer(QMainWindow):
         options_scroll.setWidget(options_inner)
         self.paint_dock.setWidget(options_scroll)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.paint_dock)
-        self._options_settings = QSettings("MasonJar", "MasonJar")
         stored_width = self._options_settings.value(
             "adjustment/optionsDockWidth", 0
         )
@@ -476,73 +841,24 @@ class AnnotationViewer(QMainWindow):
         # subprocess needed, this viewer already runs in the same masonjar
         # Python env as seam_correct.py). See
         # _on_seam_channel_toggled()/_compute_seam_live().
-        self.seam_channel_toggle = QPushButton("Seam correction", self)
+        self.seam_channel_toggle = QPushButton("Seam\ncorrection", self)
         self.seam_channel_toggle.setCheckable(True)
         self.seam_channel_toggle.setToolTip(
             "Show a live seam-corrected DAPI/channel image."
         )
         self.seam_channel_toggle.setEnabled(False)
         self.seam_channel_toggle.toggled.connect(self._on_seam_channel_toggled)
-        self.seam_mode_label = QLabel("Known-geometry", self)
-        self.seam_mode_label.setToolTip(
-            "Correction mode for the current slice: imported seamgrid when "
-            "available, otherwise grid-estimated."
-        )
-        self.seam_mode_label.setStyleSheet("color: #6c7a89; padding: 0 4px;")
-        self.seam_mode_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        # Reserve the mode line even while Seam correction is off.  Hiding a
-        # layout child changes the toolbar's height and visibly moves its
-        # button when Known-geometry/Grid-estimated first appears.
-        seam_mode_height = self.seam_mode_label.sizeHint().height()
-        self.seam_mode_label.setFixedHeight(seam_mode_height)
-        self.seam_mode_label.setText("")
-        seam_control = QWidget(self)
-        seam_layout = QVBoxLayout(seam_control)
-        seam_layout.setContentsMargins(0, 0, 0, 0)
-        seam_layout.setSpacing(0)
-        # The lower mode line makes this control taller than its neighbours.
-        # Reserve an equal upper line so the button itself stays on the same
-        # vertical centreline as Channel, Previous, and the other toolbar
-        # buttons whether the label has text or is blank.
-        seam_layout.addSpacing(seam_mode_height)
-        seam_layout.addWidget(self.seam_channel_toggle)
-        seam_layout.addWidget(self.seam_mode_label)
-        header_toolbar.addWidget(seam_control)
-
-        self.swap_views_button = QPushButton("Swap Map/DAPI", self)
-        self.swap_views_button.setToolTip(
-            "Swap the left/right positions of the DAPI image and annotation map."
-        )
-        self.swap_views_button.clicked.connect(self._swap_views)
-        header_toolbar.addWidget(self.swap_views_button)
-        header_toolbar.addSeparator()
-
-        self.overlay_toggle = QPushButton("Toggle Overlay", self)
-        self.overlay_toggle.setCheckable(True)
-        self.overlay_toggle.setChecked(self.overlay_visible)
-        self.overlay_toggle.setToolTip(
-            "Show or hide the colored annotation overlay on the DAPI image."
-        )
-        self.overlay_toggle.toggled.connect(self.toggle_overlay)
-        header_toolbar.addWidget(self.overlay_toggle)
-
-        self.allow_adjustment = QPushButton("Allow Adjustment", self)
-        self.allow_adjustment.setCheckable(True)
-        self.allow_adjustment.setChecked(False)
-        self.allow_adjustment.toggled.connect(
-            lambda _checked: self._update_paint_target_strip()
-        )
-        header_toolbar.addWidget(self.allow_adjustment)
-        header_toolbar.addSeparator()
-
-        self.paint_dock_button = QPushButton("Options", self)
-        self.paint_dock_button.setCheckable(True)
-        self.paint_dock_button.setChecked(True)
-        self.paint_dock_button.clicked.connect(self._toggle_paint_dock)
-        header_toolbar.addWidget(self.paint_dock_button)
-        self.paint_dock.visibilityChanged.connect(self._on_paint_dock_visibility)
-
-        self.annotation_map_toggle = QPushButton("Annotation map", self)
+        # The separate Known-geometry/Grid-estimated line under this button
+        # (a second QLabel row, with a matching blank spacer reserved above
+        # the button so every other toolbar button wasn't pushed off-centre
+        # by it) is gone (2026-09-19 user request): the mode is now folded
+        # into this button's own tooltip by _update_seam_mode_label()
+        # instead. That both lets this button be a normal single-row
+        # control like its neighbours and removes the whole
+        # seam_control/seam_layout wrapper widget that existed only to
+        # stack the button over that label.
+        header_toolbar.addWidget(self.seam_channel_toggle)
+        self.annotation_map_toggle = QPushButton("Annotation\nmap", self)
         self.annotation_map_toggle.setCheckable(True)
         self.annotation_map_toggle.setChecked(True)
         self.annotation_map_toggle.setToolTip(
@@ -551,6 +867,107 @@ class AnnotationViewer(QMainWindow):
         )
         self.annotation_map_toggle.toggled.connect(self._on_annotation_map_toggled)
         header_toolbar.addWidget(self.annotation_map_toggle)
+
+        self.swap_views_button = QPushButton("Swap\nMap/DAPI", self)
+        self.swap_views_button.setToolTip(
+            "Swap the left/right positions of the DAPI image and annotation map."
+        )
+        self.swap_views_button.clicked.connect(self._swap_views)
+        header_toolbar.addWidget(self.swap_views_button)
+        header_toolbar.addSeparator()
+
+        # Toggle Overlay: briefly moved beside the "Brush" section's title
+        # (2026-09-19), reverted the same day after user feedback that it
+        # broke that title's left alignment with the other sections -- back
+        # in its original spot here.
+        self.overlay_toggle = QPushButton("Toggle\nOverlay", self)
+        self.overlay_toggle.setCheckable(True)
+        self.overlay_toggle.setChecked(self.overlay_visible)
+        self.overlay_toggle.setToolTip(
+            "Show or hide the colored annotation overlay on the DAPI image. "
+            "Shortcut: Tab."
+        )
+        self.overlay_toggle.toggled.connect(self.toggle_overlay)
+        header_toolbar.addWidget(self.overlay_toggle)
+
+        self.allow_adjustment = QPushButton("Allow\nAdjustment", self)
+        self.allow_adjustment.setCheckable(True)
+        self.allow_adjustment.setChecked(False)
+        self.allow_adjustment.toggled.connect(
+            lambda _checked: self._update_paint_target_strip()
+        )
+        header_toolbar.addWidget(self.allow_adjustment)
+
+        # Compare Adjacent (2026-09-22 user request): lets the user see the
+        # previous/next slice's DAPI without leaving the current slice, by
+        # temporarily swapping the Annotation pane's display for it.
+        # Read-only -- see _enter_compare_mode().
+        self.compare_adjacent_toggle = QPushButton("Compare\nAdjacent", self)
+        self.compare_adjacent_toggle.setCheckable(True)
+        self.compare_adjacent_toggle.setChecked(False)
+        self.compare_adjacent_toggle.setToolTip(
+            "Temporarily show a nearby slice's DAPI in the Annotation pane "
+            "for visual comparison. The comparison pane itself is "
+            "read-only, but the current slice stays editable as normal "
+            "(e.g. via the DAPI pane). Toggle off to return to the "
+            "current slice's annotation map."
+        )
+        self.compare_adjacent_toggle.toggled.connect(
+            self._on_compare_adjacent_toggled
+        )
+
+        # Offset (2026-09-22 user request, revised same day): a single
+        # signed number replaces the earlier Previous/Next dropdown paired
+        # with a separate steps-away spinbox -- e.g. -2 compares two
+        # sections back from the current one, +1 compares the immediately
+        # next one.
+        self.compare_offset_spin = _SignedSpinBox(self)
+        self.compare_offset_spin.setRange(-999, 999)
+        self.compare_offset_spin.setValue(-1)
+        self.compare_offset_spin.setToolTip(
+            "Which section to compare against, relative to the current "
+            "one (e.g. -2 = two sections back, +1 = the next section)."
+        )
+        self.compare_offset_spin.valueChanged.connect(
+            self._on_compare_offset_changed
+        )
+
+        # Stacked 2-row/1-column layout (2026-09-22 user request) instead
+        # of side-by-side: keeps the Compare Adjacent control's total
+        # toolbar width down to a single widget's worth, which is what had
+        # been pushing Next/Go to... behind the toolbar's overflow chevron.
+        compare_container = QWidget(self)
+        compare_layout = QVBoxLayout(compare_container)
+        compare_layout.setContentsMargins(0, 0, 0, 0)
+        compare_layout.setSpacing(2)
+        compare_layout.addWidget(self.compare_adjacent_toggle)
+        compare_layout.addWidget(self.compare_offset_spin)
+        header_toolbar.addWidget(compare_container)
+        header_toolbar.addSeparator()
+
+        self.paint_dock_button = QPushButton("Options", self)
+        self.paint_dock_button.setCheckable(True)
+        self.paint_dock_button.setChecked(True)
+        self.paint_dock_button.clicked.connect(self._toggle_paint_dock)
+        self.paint_dock.visibilityChanged.connect(self._on_paint_dock_visibility)
+
+        # Vertically expand the header toolbar's own controls to fill the
+        # toolbar's full height, matching Previous/Next/Go to... below
+        # (2026-09-19 user request: uniform top/bottom sizing). Channel
+        # (the QComboBox) is deliberately excluded -- user follow-up asked
+        # to cancel the expand policy there specifically, leaving it at its
+        # normal combo-box height.
+        for header_widget in (
+            self.seam_channel_toggle,
+            self.annotation_map_toggle,
+            self.swap_views_button,
+            self.overlay_toggle,
+            self.allow_adjustment,
+            self.paint_dock_button,
+        ):
+            header_widget.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+            )
 
         # Keep section navigation at the far edge regardless of the Options
         # dock width or the current Seam mode label.
@@ -574,6 +991,9 @@ class AnnotationViewer(QMainWindow):
         header_toolbar.addWidget(self.prev_button)
         header_toolbar.addWidget(self.next_button)
         header_toolbar.addWidget(self.goto_button)
+        # Options toggle moved next to Go to... (2026-09-22 user
+        # request), out of the left-hand toggle cluster.
+        header_toolbar.addWidget(self.paint_dock_button)
         header_right_margin = QWidget(self)
         header_right_margin.setFixedWidth(20)
         header_toolbar.addWidget(header_right_margin)
@@ -612,11 +1032,22 @@ class AnnotationViewer(QMainWindow):
 
     def _on_annotation_map_toggled(self, visible: bool):
         """Hide the map pane without changing its overlay or editing state."""
+        if self._pending_pan_anchor is None and self.img_pixmap is not None:
+            # Only the *first* click of a rapid burst should set this --
+            # see the comment on _pending_pan_anchor's declaration. A later
+            # click within the same still-unsettled burst must not
+            # overwrite it with an already-drifted intermediate center.
+            self._pending_pan_anchor = self._viewport_center_scene_pos(
+                self.img_view
+            )
         self.anno_view.setVisible(bool(visible))
         if visible:
             # The requested restore policy is 5:5 after the map has been
             # hidden; otherwise the splitter keeps the user's drag position.
-            QTimer.singleShot(0, self._reset_image_splitter_equal)
+            # Debounced (2026-09-19, see _splitter_reset_timer's setup
+            # comment) -- rapid repeated toggling restarts this instead of
+            # queueing a fresh one-shot per click.
+            self._splitter_reset_timer.start(30)
         # QSplitter reallocates a hidden pane's width to DAPI.  Defer repaint
         # until the new viewport geometry is available to Qt.
         QTimer.singleShot(0, self.img_view.viewport().update)
@@ -630,8 +1061,17 @@ class AnnotationViewer(QMainWindow):
         self.image_splitter.setSizes([left, width - left])
 
     def _on_image_splitter_moved(self, _position: int, _index: int):
-        """Keep both viewports on one scene point after a divider drag."""
-        QTimer.singleShot(0, self._refresh_virtual_pan_scene_rects)
+        """Keep both viewports on one scene point after a divider drag.
+
+        Debounced (2026-09-19, see _splitter_refresh_timer's setup comment
+        in __init__) -- a drag emits many splitterMoved events in quick
+        succession (and Annotation map toggling under rapid clicking can
+        also queue several setSizes()-driven moves back-to-back), so this
+        restarts one shared timer instead of queueing a fresh
+        QTimer.singleShot(0, ...) per event; only the last event in a burst
+        actually triggers the refresh, once movement has actually stopped.
+        """
+        self._splitter_refresh_timer.start(30)
 
     def _toggle_paint_dock(self):
         self.paint_dock.setVisible(self.paint_dock_button.isChecked())
@@ -726,11 +1166,25 @@ class AnnotationViewer(QMainWindow):
             return False
 
         default_index = 0
+        dapi_index = None
+        active_index = None
+        active_name = getattr(self, "active_channel_name", None)
         self.channel_combo.setEnabled(True)
         for i, (name, path) in enumerate(self.channel_sources):
             self.channel_combo.addItem(name, str(path))
             if name in ("DAPI", "DAPI (pipeline)", "Dapi"):
-                default_index = i
+                dapi_index = i
+            if active_name and name == active_name and active_index is None:
+                active_index = i
+
+        # Keep whatever background channel (DAPI/Somata/Starters/...) the user
+        # was already viewing when navigating to a different section (Prev,
+        # Next, Go to). Only fall back to DAPI -- and then the first entry --
+        # when the new section has no channel by that same name.
+        if active_index is not None:
+            default_index = active_index
+        elif dapi_index is not None:
+            default_index = dapi_index
 
         self.channel_combo.setCurrentIndex(default_index)
         self.channel_combo.blockSignals(False)
@@ -923,6 +1377,20 @@ class AnnotationViewer(QMainWindow):
             cache_dir / f"{self._current_slice_id()}_{channel_tag}.png",
         )
 
+    def _compute_seam_live_for_slice(self, path: Path, slice_id: str) -> Path | None:
+        """Like _compute_seam_live(), but for an arbitrary *slice_id*
+        instead of always the current section -- used by
+        _enter_compare_mode() so Compare Adjacent's reference image
+        reflects Seam Correction too (2026-09-23 user request), not just
+        the current slice's own DAPI/channel pane."""
+        cache_dir = self._seam_root() / "_live_preview"
+        channel_tag = hashlib.sha256(
+            str(Path(path).resolve()).encode("utf-8")
+        ).hexdigest()[:12]
+        return self._compute_seam_live_for(
+            path, slice_id, cache_dir / f"{slice_id}_{channel_tag}.png",
+        )
+
     @staticmethod
     def _is_dapi_channel(name: str) -> bool:
         return str(name or "").strip().casefold().startswith("dapi")
@@ -1087,15 +1555,25 @@ class AnnotationViewer(QMainWindow):
         toggle.blockSignals(False)
         self._update_seam_mode_label(path)
 
+    _SEAM_TOGGLE_BASE_TOOLTIP = "Show a live seam-corrected DAPI/channel image."
+
     def _update_seam_mode_label(self, path) -> None:
-        """Show the live mode that the current slice will use.
+        """Reflect the live mode this slice will use in the Seam correction
+        button's own tooltip (2026-09-19 user request: previously a second
+        QLabel row ("Known-geometry"/"Grid-estimated") stacked under the
+        button -- moved into the tooltip instead so the button can be a
+        normal single-row control, matching the header toolbar's other
+        buttons in height).
 
         A Process output is intentionally not consulted here: Adjustment
-        Viewer always computes its own live result so this label and the
+        Viewer always computes its own live result so this tooltip and the
         displayed correction share one mode decision.
         """
-        label = getattr(self, "seam_mode_label", None)
-        if label is None:
+        toggle = getattr(self, "seam_channel_toggle", None)
+        if toggle is None:
+            return
+        if not toggle.isChecked():
+            toggle.setToolTip(self._SEAM_TOGGLE_BASE_TOOLTIP)
             return
         mode_label = "Known-geometry"
         if path is not None:
@@ -1108,9 +1586,10 @@ class AnnotationViewer(QMainWindow):
             except Exception as exc:  # noqa: BLE001
                 print(f"LOG: seam_mode_label_failed {exc!r}", flush=True)
                 mode_label = "Grid-estimated"
-        toggle = getattr(self, "seam_channel_toggle", None)
-        label.setText(
-            mode_label if toggle is not None and toggle.isChecked() else ""
+        toggle.setToolTip(
+            f"{self._SEAM_TOGGLE_BASE_TOOLTIP}\n"
+            f"Mode: {mode_label} (imported seamgrid when available, "
+            "otherwise grid-estimated)."
         )
 
     def _apply_seam_correction(self, path, name, *, interactive: bool) -> None:
@@ -1231,6 +1710,7 @@ class AnnotationViewer(QMainWindow):
             self.paint_swatch.setStyleSheet("background-color: #cccccc;")
             self.paint_target_name.setText("None")
             self.paint_target_name.setToolTip("")
+            self.paint_target_fullname.setText("")
         else:
             rid = int(self.selected_region_id)
             r, g, b = resolve_label_color(rid, self.structure_map, self.catalog)
@@ -1239,6 +1719,14 @@ class AnnotationViewer(QMainWindow):
             )
             self.paint_target_name.setText(self.selected_region_name)
             self.paint_target_name.setToolTip(self._region_tooltip(rid))
+            full_name = self._region_full_name(rid)
+            # Skip the row when the full name is just a repeat of the acronym
+            # line (e.g. selected_region_name already reads "VISp — Primary
+            # visual area", or a full-detail-tier id with no separate long name).
+            if full_name and full_name not in self.selected_region_name:
+                self.paint_target_fullname.setText(full_name)
+            else:
+                self.paint_target_fullname.setText("")
 
         if self.ccf_advanced and self.level_combo.count() > 0:
             tier_ctx = self.level_combo.currentText()
@@ -1357,6 +1845,63 @@ class AnnotationViewer(QMainWindow):
             and 0 <= y < self.current_label.shape[0]
         )
 
+    def _is_inside_compare_image(self, image_point) -> bool:
+        """Bounds-only check for whether *image_point* lands on the Compare
+        Adjacent picture's own drawn area (its native size, positioned at
+        _compare_pixmap_offset -- the picture's own top-left corner in
+        scene coordinates, which is not always the scene origin; see
+        _enter_compare_mode()'s item_x/item_y), without the status-bar
+        message or array lookup that _compare_adjacent_label_at() also
+        does. Split out (2026-09-23 user report) so _pointer_in_pane_
+        bounds() can ask "is this point on the picture" for painting/hover
+        gates too, not just the right-click lookup that used to be the only
+        caller of this bounds math.
+        """
+        offset_x, offset_y = self._compare_pixmap_offset
+        native_w, native_h = self._compare_pixmap_native_size
+        pic_x = image_point.x() - offset_x
+        pic_y = image_point.y() - offset_y
+        return (
+            native_w > 0
+            and native_h > 0
+            and 0 <= pic_x < native_w
+            and 0 <= pic_y < native_h
+        )
+
+    def _pointer_in_pane_bounds(self, view, image_point) -> bool:
+        """Whether *image_point* (current_label-space coordinates, i.e.
+        what view_to_image_coordinates() returns) lands on real, hoverable/
+        clickable pixel content for *view*'s pane right now. Single shared
+        gate for painting, the hover status bar, and right-click paint-
+        target selection (2026-09-23 user report): while Compare Adjacent
+        shows a reference slice whose native image is larger than
+        current_label's own box, the Annotation pane's real content area is
+        that reference picture's own extent, not current_label's -- using
+        current_label's bounds unconditionally (_is_inside_dapi_image(),
+        still correct for the DAPI pane and for the Annotation pane outside
+        Compare Adjacent) made every caller reject valid points in that
+        larger margin before they ever reached the Compare Adjacent-aware
+        code that already existed for them (_compare_adjacent_label_at()).
+        This turned out to affect not just the hover status bar but also
+        _select_paint_target_at_view_pos()'s own initial guard -- both are
+        routed through this one method now so a future fix only has to
+        happen in one place.
+
+        Uses the picture's own native bounds (not the padded canvas) for
+        Compare Adjacent (2026-09-23, reconsidered same-day follow-up): an
+        earlier revision of this method used the padded canvas so the
+        black margin around a smaller reference image would count as a
+        selectable/hoverable Lost in Warp area -- reverted, since that
+        margin is not a real warped-out area, just "no reference image
+        here". It now falls outside this pane's bounds like any other
+        dead space, so it gets the same "Outside the adjacent slice's
+        image" treatment as being off the canvas entirely -- see
+        _is_inside_compare_image() and _compare_adjacent_label_at().
+        """
+        if self._compare_mode_active and view is self.anno_view:
+            return self._is_inside_compare_image(image_point)
+        return self._is_inside_dapi_image(image_point)
+
     def _configure_dual_views(self):
         """Center alignment, viewport-center zoom anchors, linked scrollbars."""
         for view in (self.img_view, self.anno_view):
@@ -1380,6 +1925,28 @@ class AnnotationViewer(QMainWindow):
                 lambda _v, src=view: self._sync_scroll_from(src)
             )
 
+    def _refresh_pan_margins(self):
+        """Recompute and cache each pane's virtual-pan margins.
+
+        Only called from actual resize/zoom entry points
+        (_refresh_virtual_pan_scene_rects() -- splitter drag and startup --
+        and _apply_zoom()), never from a per-render path. Each pane's own
+        viewport size is used (img_view/anno_view can differ when the
+        splitter isn't centred), matching what _lock_scene_rect_to_pixmap()
+        computed inline before this cache existed.
+        """
+        scale = max(self.zoom_level / 100.0, 0.01)
+        for view, attr in (
+            (self.img_view, "_pan_margin_img"),
+            (self.anno_view, "_pan_margin_anno"),
+        ):
+            vp = view.viewport().size()
+            setattr(
+                self,
+                attr,
+                (max(64.0, vp.width() / scale), max(64.0, vp.height() / scale)),
+            )
+
     def _lock_scene_rect_to_pixmap(self, scene: QGraphicsScene, pixmap: QPixmap):
         """Set a centred virtual canvas so fit-to-window images can pan.
 
@@ -1387,22 +1954,52 @@ class AnnotationViewer(QMainWindow):
         AlignCenter pins the image in place.  Equal virtual margins retain the
         centred starting position while giving both axes enough scene space for
         drag-pan at every zoom level.
+
+        Uses the cached per-pane margins from _refresh_pan_margins() instead
+        of querying view.viewport().size() live (2026-09-19 user report: the
+        slice still moved up/down on LUT slider drags and Seam Correction
+        toggles even with the setSceneRect no-op guard below). Both of those
+        actions re-render on every slider tick / toggle, and if the
+        toolbar/sidebar layout is mid-pass at that exact moment (a label's
+        text changed elsewhere in the same window, a style repolish, etc.),
+        a live viewport().size() query can transiently read a pixel or two
+        off from its settled value -- which the equality guard below would
+        then treat as a genuine resize and let the setSceneRect() through.
+        Margins only change on an explicit resize (splitter drag, zoom
+        change) now, so this render path can no longer observe that kind of
+        transient jitter at all.
+
+        Also skips the actual setSceneRect() call when the computed rect
+        already matches the scene's current one (2026-09-18 user report:
+        Refresh, Undo, the LUT sliders, and the Seam Correction toggle --
+        none of which change the pixmap's pixel size or the zoom level --
+        each nudged the slice's on-screen position by a pixel or two). Qt
+        recomputes the scrollbar range whenever setSceneRect() is called at
+        all, even to an identical value, and that requantization is what was
+        producing the drift. Real resizes (zoom change, splitter drag, an
+        actual pixmap size change on channel/slice navigation) still differ
+        from the current rect and are unaffected by this guard.
         """
         if pixmap is None or pixmap.isNull():
             return
-        view = self.img_view if scene is self.img_scene else self.anno_view
-        scale = max(self.zoom_level / 100.0, 0.01)
-        viewport = view.viewport().size()
-        margin_x = max(64.0, viewport.width() / scale)
-        margin_y = max(64.0, viewport.height() / scale)
-        scene.setSceneRect(
-            QRectF(
-                -margin_x,
-                -margin_y,
-                pixmap.width() + 2 * margin_x,
-                pixmap.height() + 2 * margin_y,
-            )
+        margin_x, margin_y = (
+            self._pan_margin_img if scene is self.img_scene else self._pan_margin_anno
         )
+        target_rect = QRectF(
+            -margin_x,
+            -margin_y,
+            pixmap.width() + 2 * margin_x,
+            pixmap.height() + 2 * margin_y,
+        )
+        current_rect = scene.sceneRect()
+        if (
+            abs(current_rect.left() - target_rect.left()) < 0.5
+            and abs(current_rect.top() - target_rect.top()) < 0.5
+            and abs(current_rect.width() - target_rect.width()) < 0.5
+            and abs(current_rect.height() - target_rect.height()) < 0.5
+        ):
+            return
+        scene.setSceneRect(target_rect)
 
     def _center_linked_views(self, center_scene_pos: QPointF):
         """Center both panes on one shared scene coordinate.
@@ -1419,34 +2016,149 @@ class AnnotationViewer(QMainWindow):
             self._syncing_scroll = False
 
     def _refresh_virtual_pan_scene_rects(self):
-        """Resize virtual pan margins after the draggable splitter moves."""
+        """Resize virtual pan margins after the draggable splitter moves
+        (including the splitter resize the Annotation map toggle triggers
+        when it hides/restores that pane, via _reset_image_splitter_equal()
+        -> QSplitter.setSizes() -> the splitterMoved signal this is wired
+        to).
+
+        2026-09-19 user report: toggling Annotation map drifted the slice's
+        position -- on top of whatever repositioning this splitter resize
+        genuinely calls for (a real viewport width change on the side that
+        did resize does need a fresh centerOn(), unlike the pure re-render
+        cases _apply_lut_to_display()/show_image_with_overlay() fixed with
+        a saved-scrollbar restore -- there's no old value to restore here,
+        the scrollbar range itself changed). But _center_linked_views()
+        below unconditionally recenters *both* views from the same one
+        captured *img_view* point, even a view whose own size didn't
+        actually change -- and that unnecessary recentring is exactly the
+        same rounding-prone centerOn() remapping _sync_scroll_from() was
+        just fixed for. Saves each view's scrollbar values first and
+        restores them verbatim afterward for whichever view's viewport
+        size turns out to be unchanged, undoing that recentring's rounding
+        for it while leaving the view that did resize with its freshly
+        computed (and necessary) position.
+        """
         if self.img_pixmap is None or self.img_pixmap.isNull():
             return
-        center = self._viewport_center_scene_pos(self.img_view)
+        prev_sizes = {
+            view: view.viewport().size() for view in (self.img_view, self.anno_view)
+        }
+        # 2026-09-23 user report: after zooming into the first slice and
+        # pressing Next, the scrollbars stayed the right *size* (see the
+        # scrollbar-size unification fix earlier this session) but the
+        # image itself ended up pinned to the top-left instead of centred,
+        # even though both scrollbar handles sat in the middle of their
+        # tracks. Root cause: this function is no longer reached only from
+        # a splitter drag (its original, only caller) -- eventFilter()'s
+        # Resize handler now also debounces into it for a paint_dock/main-
+        # window resize (added the same day, to fix pan margins going
+        # stale across the deferred Options-dock-width settle -- see that
+        # handler's own comment). For a splitter drag, a view whose own
+        # viewport size didn't change also has unchanged pan margins (they
+        # are a pure function of viewport size and zoom, both unchanged),
+        # so its scene rect doesn't move either, and its just-captured
+        # prev_scroll value is still exactly valid to restore. But when
+        # THIS function runs from a dock/window resize, Qt may have
+        # already resized the viewport and auto-recentred it (via
+        # AnchorViewCenter) using the *old*, not-yet-refreshed pan-margin
+        # scene rect before this function ever got a chance to run --
+        # prev_scroll then reflects "centred relative to a scene rect that
+        # is about to change size", not "centred relative to the current
+        # one". _refresh_pan_margins() + _lock_scene_rect_to_pixmap()
+        # below can then genuinely grow/shrink that scene rect even though
+        # the viewport's pixel *size* alone looks unchanged across this
+        # one function call -- and blindly restoring prev_scroll in that
+        # case reintroduces exactly the top-left bias this comment is
+        # about (an old scrollbar value keeps its old absolute number, but
+        # the range it's read against just changed, so the same number now
+        # sits close to one end of the new, larger range instead of the
+        # middle). Capturing each scene's rect here too, and only treating
+        # a view as "unchanged" when its rect also didn't move, closes
+        # that gap without touching the splitter-drag behavior at all
+        # (there, the rect genuinely doesn't move for an unchanged view,
+        # so this extra condition is always already satisfied).
+        prev_rects = {
+            self.img_view: self.img_scene.sceneRect(),
+            self.anno_view: self.anno_scene.sceneRect(),
+        }
+        prev_scroll = {
+            view: (
+                view.horizontalScrollBar().value(),
+                view.verticalScrollBar().value(),
+            )
+            for view in (self.img_view, self.anno_view)
+        }
+        self._refresh_pan_margins()
+        if self._pending_pan_anchor is not None:
+            # Re-target the scene point captured before the Annotation map
+            # toggle burst began, rather than trusting a live read of
+            # img_view now -- see _pending_pan_anchor's declaration comment.
+            center = self._pending_pan_anchor
+            self._pending_pan_anchor = None
+        else:
+            center = self._viewport_center_scene_pos(self.img_view)
         self._lock_scene_rect_to_pixmap(self.img_scene, self.img_pixmap)
         anno_pixmap = self._anno_pixmap()
         if anno_pixmap is not None and not anno_pixmap.isNull():
             self._lock_scene_rect_to_pixmap(self.anno_scene, anno_pixmap)
         self._center_linked_views(center)
+        scene_for = {self.img_view: self.img_scene, self.anno_view: self.anno_scene}
+        unchanged = [
+            view
+            for view in (self.img_view, self.anno_view)
+            if view.isVisible()
+            and view.viewport().size() == prev_sizes[view]
+            and scene_for[view].sceneRect() == prev_rects[view]
+        ]
+        if unchanged:
+            self._syncing_scroll = True
+            try:
+                for view in unchanged:
+                    h_value, v_value = prev_scroll[view]
+                    view.horizontalScrollBar().setValue(h_value)
+                    view.verticalScrollBar().setValue(v_value)
+            finally:
+                self._syncing_scroll = False
 
     def _viewport_center_scene_pos(self, view: QGraphicsView) -> QPointF:
         vp = view.viewport()
         return view.mapToScene(vp.rect().center())
 
     def _apply_zoom(self, zoom_percent: int, *, center_scene_pos: QPointF | None = None):
-        """Scale both panes, keeping the scene point under the viewport center."""
+        """Scale both panes, keeping the scene point under the viewport center.
+
+        show_image_with_overlay() calls this on every single overlay rebuild
+        (LUT slider ticks, Seam Correction toggle, Auto/Reset, Refresh,
+        Undo -- not just actual zoom changes) purely to restore the
+        viewport's pan position afterward. Re-issuing view.setTransform()
+        with a numerically identical matrix on every one of those calls
+        still forces Qt to fully reset each view's scene<->viewport mapping
+        state; the centerOn() that immediately follows then re-derives a
+        scrollbar position from that freshly-reset state, which can round
+        to a different achievable integer scrollbar value than what was
+        already showing even for the exact same target scene point --
+        producing the up/down drift the pan-margin caching and setSceneRect
+        no-op guard (both above) did not (2026-09-19 user report: LUT
+        slider, Seam Correction toggle, and now Auto/Reset all still
+        drifted). Skipping setTransform() entirely when the requested zoom
+        already matches self.zoom_level removes this: only centerOn() runs,
+        which does not reset the transform first.
+        """
         zoom_percent = max(50, min(1000, int(zoom_percent)))
         if center_scene_pos is None:
             center_scene_pos = self._viewport_center_scene_pos(self.img_view)
-        scale = zoom_percent / 100.0
-        transform = QTransform()
-        transform.scale(scale, scale)
-        self._syncing_scroll = True
-        try:
-            for view in (self.img_view, self.anno_view):
-                view.setTransform(transform)
-        finally:
-            self._syncing_scroll = False
+        if zoom_percent != self.zoom_level:
+            scale = zoom_percent / 100.0
+            transform = QTransform()
+            transform.scale(scale, scale)
+            self._syncing_scroll = True
+            try:
+                for view in (self.img_view, self.anno_view):
+                    view.setTransform(transform)
+            finally:
+                self._syncing_scroll = False
+            self._refresh_pan_margins()
         self._center_linked_views(center_scene_pos)
         self.zoom_level = zoom_percent
         self.zoom_label.setText(f"Zoom {self.zoom_level}%")
@@ -1456,9 +2168,32 @@ class AnnotationViewer(QMainWindow):
             self.zoom_slider.blockSignals(False)
 
     def _sync_scroll_from(self, source: QGraphicsView):
+        """Mirror the *other* pane onto whatever scene point *source*'s own
+        scrollbars now show, without touching *source* itself.
+
+        2026-09-19 user report: dragging the horizontal scrollbar directly
+        also nudged the vertical position -- on the very same view the user
+        was dragging, which shouldn't move at all from a horizontal-only
+        drag. Root cause: this used to call _center_linked_views(), which
+        unconditionally re-applies centerOn() to *both* views, including
+        source. That re-derives source's own scrollbar values from its
+        just-set position by mapping through the scene<->view transform,
+        and that remapping can round to a value a pixel off from what the
+        user's drag had just set (the same rounding
+        _apply_lut_to_display()/show_image_with_overlay() already had to
+        work around elsewhere) -- even though source's position was
+        already exactly correct and needed no recentring at all. Only the
+        other view actually needs it.
+        """
         if self._syncing_scroll:
             return
-        self._center_linked_views(self._viewport_center_scene_pos(source))
+        other = self.anno_view if source is self.img_view else self.img_view
+        center = self._viewport_center_scene_pos(source)
+        self._syncing_scroll = True
+        try:
+            other.centerOn(center)
+        finally:
+            self._syncing_scroll = False
 
     def _set_img_pixmap(self, pixmap: QPixmap):
         if self._img_pixmap_item is not None:
@@ -1486,6 +2221,52 @@ class AnnotationViewer(QMainWindow):
             self._anno_pixmap_item.setPixmap(pixmap)
         self._anno_pixmap_item.setZValue(0)
         self._lock_scene_rect_to_pixmap(self.anno_scene, pixmap)
+
+    def _set_compare_pixmap(self, pixmap: QPixmap):
+        """Show the Compare Adjacent composite on its own item, stacked
+        above _anno_pixmap_item instead of replacing it (2026-09-23 user
+        report; see the comment on _compare_pixmap_item's init)."""
+        if self._compare_pixmap_item is None:
+            self._compare_pixmap_item = EditableRaster(pixmap)
+            self.anno_scene.addItem(self._compare_pixmap_item)
+        else:
+            self._compare_pixmap_item.setPixmap(pixmap)
+        self._compare_pixmap_item.setZValue(10)
+        self._compare_pixmap_item.setVisible(True)
+        # Lock the pan/scrollbar range to the REAL annotation pixmap's own
+        # size, not to this compare item's own size (2026-09-23 user
+        # report: the Annotation pane's scrollbar thumb size differed from
+        # the DAPI pane's once Compare Adjacent was turned on, and stayed
+        # different even after turning it back off). The adjacent slice's
+        # native image can be larger than current_label's box (see the
+        # native-size comment in _enter_compare_mode()), and locking the
+        # scene rect to that larger size made the two panes' scrollable
+        # ranges -- and therefore their scrollbar thumb sizes -- genuinely
+        # diverge while comparing. A QGraphicsItem still renders in full
+        # regardless of the scene's nominal rect, so this compare item is
+        # still drawn at its own true size and position -- nothing here
+        # crops or rescales the picture -- this only keeps both panes'
+        # *pannable* range identical to what the DAPI pane already uses.
+        # (The "persisted after turning off" half of the report was the
+        # same root cause: show_image_with_overlay() -> _set_anno_pixmap()
+        # does correctly re-lock the Annotation pane back to the small
+        # real pixmap on exit, but only once refresh_drawings() actually
+        # runs; anything that re-enters compare mode meanwhile --
+        # _refresh_compare_if_active(), offset changes -- re-grows it via
+        # this same call, so the only reliable fix is to never grow it in
+        # the first place.) Falls back to this pixmap's own size only if
+        # the real annotation pixmap isn't available yet.
+        real_anno_pixmap = self._anno_pixmap()
+        reference_pixmap = (
+            real_anno_pixmap
+            if real_anno_pixmap is not None and not real_anno_pixmap.isNull()
+            else pixmap
+        )
+        self._lock_scene_rect_to_pixmap(self.anno_scene, reference_pixmap)
+
+    def _hide_compare_pixmap(self):
+        if self._compare_pixmap_item is not None:
+            self._compare_pixmap_item.setVisible(False)
 
     def _display_overlay_pixmap(self) -> QPixmap:
         """Map label pixels into the exact image display raster before compositing."""
@@ -1515,7 +2296,10 @@ class AnnotationViewer(QMainWindow):
         for node in self.catalog.get("by_id", {}).values():
             if not node:
                 continue
-            hay = f"{node.get('acronym', '')} {node.get('name', '')}".lower()
+            hay = (
+                f"{node.get('acronym', '')} {node.get('name', '')} "
+                f"{node.get('alias', '')}"
+            ).lower()
             if not q or q in hay:
                 out.append(node)
         out.sort(key=lambda n: str(n.get("acronym", "")))
@@ -1565,7 +2349,10 @@ class AnnotationViewer(QMainWindow):
                 break
             if ac == q and exact_acronym is None:
                 exact_acronym = node
-            hay = f"{node.get('acronym', '')} {node.get('name', '')}".lower()
+            hay = (
+                f"{node.get('acronym', '')} {node.get('name', '')} "
+                f"{node.get('alias', '')}"
+            ).lower()
             if contains is None and (q in hay or q in disp.lower()):
                 contains = node
         node = exact_display or exact_acronym or contains
@@ -1613,6 +2400,24 @@ class AnnotationViewer(QMainWindow):
             if dont_show.isChecked():
                 set_suppressed(KEY_MIXED_RESOLUTION_TIER, True)
 
+    def _region_picker_expanded(self) -> bool:
+        """Whether the Region picker section is currently expanded.
+
+        Reads the header QToolButton _make_group_collapsible() stashed on
+        the group via its "collapsibleHeader" property, rather than
+        tracking a second, separately-maintained boolean that could drift
+        out of sync with it. Defaults to True (visible) if the group or its
+        header aren't set up yet, so an early call during __init__ still
+        behaves like the pre-collapsible-sidebar code did.
+        """
+        group = getattr(self, "_paint_controls_group", None)
+        if group is None:
+            return True
+        header = group.property("collapsibleHeader")
+        if header is None:
+            return True
+        return bool(header.isChecked())
+
     def _update_paint_resolution_warning(self):
         if not hasattr(self, "paint_resolution_warning"):
             return
@@ -1644,10 +2449,65 @@ class AnnotationViewer(QMainWindow):
         parts = [messages[c] for c in result.get("issues", []) if c in messages]
         if parts:
             self.paint_resolution_warning.setText(" ".join(parts))
-            self.paint_resolution_warning.setVisible(True)
+            # Only actually show it while Region picker (this label's own
+            # section) is expanded (2026-09-19 user report: clicking
+            # Refresh made this label reappear even while that section was
+            # still collapsed -- this unconditional setVisible(True) is
+            # exactly what did it, since nothing here checked the section's
+            # own collapsed state before). The warning is still computed
+            # and its text kept current either way, so expanding the
+            # section later shows it immediately without waiting for the
+            # next audit.
+            self.paint_resolution_warning.setVisible(self._region_picker_expanded())
         else:
             self.paint_resolution_warning.clear()
             self.paint_resolution_warning.setVisible(False)
+        # Region picker uses a Fixed vertical size policy (see add_section()
+        # in _OptionsSectionsContainer) so it never grows past its content's
+        # sizeHint(). updateGeometry() alone (2026-09-23, first attempt)
+        # turned out not to be enough: QBoxLayout only asks a child for its
+        # real heightForWidth() using the *layout's* current effective
+        # width, and a Fixed-policy QGroupBox's own sizeHint() does not
+        # reliably re-derive that from this label's actual rendered width
+        # after the fact -- so the box was still sized for fewer wrapped
+        # lines than the label (still user-reported clipped) even after
+        # invalidating the cached hint. Computing the wrapped height
+        # directly from the label's own current width via QFontMetrics and
+        # pinning it with setFixedHeight() sidesteps that negotiation
+        # entirely: the label always reports its own exact real height as
+        # its sizeHint(), which a Fixed-policy ancestor's sizeHint() sums
+        # correctly regardless of any heightForWidth quirk.
+        self._resize_paint_resolution_warning()
+        group = getattr(self, "_paint_controls_group", None)
+        if group is not None:
+            group.updateGeometry()
+        self._sync_options_list_heights()
+
+    def _resize_paint_resolution_warning(self):
+        """Pin paint_resolution_warning's height to what its current text
+        actually needs at its current width -- see the comment at this
+        method's only call site, _update_paint_resolution_warning()."""
+        label = getattr(self, "paint_resolution_warning", None)
+        if label is None:
+            return
+        if not label.isVisible() or not label.text():
+            label.setMinimumHeight(0)
+            label.setMaximumHeight(16777215)  # Qt's QWIDGETSIZE_MAX -- undo any prior cap
+            return
+        width = label.width()
+        if width <= 0:
+            group = getattr(self, "_paint_controls_group", None)
+            width = (
+                group.width() - 16
+                if group is not None and group.width() > 0
+                else 240
+            )
+        rect = label.fontMetrics().boundingRect(
+            QRect(0, 0, max(width, 1), 0),
+            int(Qt.TextFlag.TextWordWrap),
+            label.text(),
+        )
+        label.setFixedHeight(rect.height() + 4)
 
     def _init_paint_region_controls(self):
         """Populate hierarchy/area combos from the CCF catalog."""
@@ -1712,7 +2572,8 @@ class AnnotationViewer(QMainWindow):
         return str(data) if data is not None else None
 
     def _region_display_text(self, node: dict) -> str:
-        return f"{node['acronym']} — {node['name']}"
+        display_name = node.get("alias") or node["name"]
+        return f"{node['acronym']} — {display_name}"
 
     def _region_picker_text(self, node: dict) -> str:
         """Compact Area text; the full region name is supplied as a tooltip."""
@@ -1724,9 +2585,27 @@ class AnnotationViewer(QMainWindow):
         tooltip = combo.itemData(combo.currentIndex(), Qt.ItemDataRole.ToolTipRole)
         combo.setToolTip(str(tooltip or ""))
 
+    def _region_full_name(self, region_id: int) -> str:
+        """Full anatomical name for a region id, or "" if none is known.
+
+        Same source/fallback order as _region_tooltip()'s name line: the
+        catalog node's "name" field first (present for every tiered region),
+        then structure_map's "name" (covers full-detail-tier ids that have no
+        catalog node).
+        """
+        node = get_region(int(region_id), self.catalog) if self.catalog else None
+        if node and node.get("name"):
+            return str(node.get("alias") or node["name"])
+        info = self.structure_map.get(np.uint32(region_id), {})
+        return str(info.get("name") or "")
+
     def _region_tooltip(self, region_id: int) -> str:
         node = get_region(int(region_id), self.catalog) if self.catalog else None
-        parts = [str(node["name"])] if node and node.get("name") else []
+        parts = (
+            [str(node.get("alias") or node["name"])]
+            if node and node.get("name")
+            else []
+        )
         info = self.structure_map.get(np.uint32(region_id), {})
         color = info.get("color")
         if color:
@@ -1755,6 +2634,7 @@ class AnnotationViewer(QMainWindow):
                     if query
                     in (
                         f"{node.get('acronym', '')} {node.get('name', '')} "
+                        f"{node.get('alias', '')} "
                         f"{node.get('groupParentAcronym', '')}"
                     ).lower()
                 ]
@@ -1980,16 +2860,90 @@ class AnnotationViewer(QMainWindow):
     def _current_slice_id(self) -> str:
         return self.pairs[self.current_index][2]
 
-    def _make_group_collapsible(self, group):
+    def _make_group_collapsible(
+        self, group, title=None, draggable=False, key=None, header_extra=None
+    ):
         """Add a clickable header that expands/collapses the group's contents.
         Uses a QToolButton (not QGroupBox.setCheckable) so it never toggles child
-        enabled state, which would clash with app-managed disables (e.g. catalog)."""
+        enabled state, which would clash with app-managed disables (e.g. catalog).
+
+        *title* lets this be reused on a plain QWidget sub-section that has
+        its own QVBoxLayout but no QGroupBox title of its own (2026-09-19
+        user request: fold just the LUT black/white/gamma controls inside
+        the "View" group, independent of Opacity/Zoom above them, rather
+        than the whole group). When *title* is omitted, behavior is
+        unchanged: the QGroupBox's own title is used and cleared.
+
+        *draggable* uses _DraggableGroupHeader instead of a plain
+        QToolButton, so the header can also be dragged to reorder this
+        section within the Options sidebar's reorderable list (2026-09-19
+        user request). Only the 5 top-level sections that actually live in
+        that list pass this; the nested LUT sub-header does not (it isn't a
+        list row, so there's nothing to reorder it against)."""
         layout = group.layout()
         if layout is None:
             return
-        title = group.title()
-        group.setTitle("")
-        header = QToolButton(group)
+        if title is None:
+            # The 5 top-level sections always pass title= explicitly now
+            # (2026-09-23: switched from QGroupBox to QFrame -- see the
+            # comment below) -- this branch only remains as a fallback for
+            # a QGroupBox-based caller that doesn't.
+            title = group.title()
+            group.setTitle("")
+        if draggable:
+            # Every one of the 5 top-level Options sidebar sections is
+            # draggable, and only they get this bordered "tab" look, so
+            # *draggable* doubles as the signal for it (2026-09-23,
+            # replacing the second QGroupBox/title fix attempt): a
+            # QGroupBox reserves title-bar height above its content
+            # structurally, tied to the widget class itself rather than
+            # to the title *text* -- an empty title string plus
+            # `QGroupBox::title { height: 0px }` did not remove it in the
+            # Qt style this app renders with (2026-09-23 user report: the
+            # gap persisted unchanged after that attempt). These 5
+            # sections were switched from QGroupBox to plain QFrame at
+            # their construction sites specifically to sidestep this --
+            # QFrame has no title concept at all, so there is nothing
+            # calling for that reserved space in the first place.
+            #
+            # 2026-09-23 user report, 2nd follow-up (with a screenshot):
+            # a bare, selector-less declaration list still isn't scoped to
+            # just this one widget -- View's own border-box visibly nested
+            # a *second* border box tightly around the LUT sub-section
+            # (a plain QWidget, not even a QFrame, added inside View's
+            # layout before this runs). Qt Style Sheets cascade "border"
+            # down to unstyled descendants of whatever widget the sheet
+            # was set on regardless of whether a selector is present --
+            # the earlier switch away from a bare "QFrame { ... }" type
+            # selector only stopped this rule from also matching OTHER
+            # QFrame instances *elsewhere* in the window that happen to
+            # share the type, it never stopped it from cascading into
+            # this widget's own descendants. An ID selector scoped to a
+            # unique objectName does not have that problem: Qt only
+            # matches it against the exact (type, objectName) pair, so a
+            # plain QWidget descendant like the LUT sub-section can never
+            # match a "QFrame#<id>" rule at all, however deep in the tree
+            # it lives.
+            section_id = f"topLevelOptionsSection_{id(group)}"
+            group.setObjectName(section_id)
+            group.setStyleSheet(
+                f"QFrame#{section_id} {{ border: 1px solid white; "
+                "border-radius: 3px; margin: 0px; padding: 2px; }"
+            )
+        # Stable key for section-order persistence (drag-reorder wrapper
+        # below) -- captured here since QGroupBox.title() is cleared right
+        # above, and a plain QWidget sub-section (title= override) has no
+        # title of its own at all. *key* lets this stay stable across a
+        # display-title rename (2026-09-19: "Brush & edits" -> "Brush"),
+        # since the saved order string in QSettings is keyed by whatever
+        # this property held when the order was last saved. Defaults to
+        # *title* for every other section, unchanged.
+        group.setProperty("sectionKey", key if key is not None else title)
+        if draggable:
+            header = _DraggableGroupHeader(group, viewer=self)
+            header.setToolTip("Click to fold/unfold. Drag to reorder.")
+        else:
+            header = QToolButton(group)
         header.setText("▾ " + title)
         header.setCheckable(True)
         header.setChecked(True)
@@ -1998,52 +2952,193 @@ class AnnotationViewer(QMainWindow):
             "QToolButton { border: none; font-weight: bold; padding: 2px; }"
         )
         header.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout.insertWidget(0, header)
+        # Lets other code (e.g. _update_paint_resolution_warning()) ask
+        # whether this section is currently expanded without needing its
+        # own reference to *header* threaded through separately.
+        group.setProperty("collapsibleHeader", header)
+        # *header_extra* places a small always-visible widget beside the
+        # title -- e.g. Toggle Overlay next to the "Brush" section
+        # (2026-09-19 user request: moved out of the top header toolbar so
+        # it sits next to that section's title instead, visible even while
+        # the section itself is collapsed). Kept out of the header's own
+        # QToolButton so clicking it does not also fold/unfold the section.
+        if header_extra is not None:
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(4)
+            header_row.addWidget(header, 1)
+            header_row.addWidget(header_extra, 0)
+            layout.insertLayout(0, header_row)
+        else:
+            header_row = None
+            layout.insertWidget(0, header)
         header.toggled.connect(
-            lambda on, g=group, h=header, t=title: self._set_group_collapsed(
-                g, h, t, on
+            lambda on, g=group, h=header, t=title, hr=header_row: self._set_group_collapsed(
+                g, h, t, on, header_row=hr
             )
         )
 
-    def _set_group_collapsed(self, group, header, title, expanded):
+    def _set_group_collapsed(self, group, header, title, expanded, header_row=None):
         header.setText(("▾ " if expanded else "▸ ") + title)
         layout = group.layout()
         if layout is None:
             return
+        # paint_resolution_warning manages its own visibility from
+        # _update_paint_resolution_warning() (it should only ever show when
+        # there's an actual warning to show, regardless of this section's
+        # collapse state) -- the blanket "match every child to this
+        # section's expand state" loop below would otherwise force it
+        # visible on every expand (2026-09-19 user report: Refresh made
+        # this label reappear even while Region picker was still collapsed
+        # -- the blanket loop isn't even the direct cause there, that
+        # label's own setVisible(True) call in the warning-refresh path
+        # simply overrode the collapse state's own hide, since nothing
+        # about setting a widget's visibility respects its ancestor's
+        # collapsed state on its own -- but leaving it in the blanket loop
+        # would introduce the same class of bug in the other direction,
+        # forcing it visible on every expand even with nothing to warn
+        # about, so it's excluded here and left entirely to that method).
+        warning = getattr(self, "paint_resolution_warning", None)
         for i in range(layout.count()):
             item = layout.itemAt(i)
             widget = item.widget()
-            if widget is header:
+            if widget is header or widget is warning:
                 continue
             if widget is not None:
                 widget.setVisible(expanded)
                 continue
             sub = item.layout()
-            if sub is not None:
-                for j in range(sub.count()):
-                    sub_widget = sub.itemAt(j).widget()
-                    if sub_widget is not None:
-                        sub_widget.setVisible(expanded)
+            if sub is None or sub is header_row:
+                # header_row (when header_extra was used) holds the header
+                # itself plus its always-visible extra widget (e.g. Toggle
+                # Overlay next to "Brush") -- neither should be hidden by
+                # collapsing this section, so this sub-layout is skipped
+                # entirely rather than having its children's visibility
+                # toggled like an ordinary control row.
+                continue
+            for j in range(sub.count()):
+                sub_widget = sub.itemAt(j).widget()
+                if sub_widget is not None:
+                    sub_widget.setVisible(expanded)
+        if warning is not None and warning is not header:
+            # Re-run its own visibility decision now that *expanded* (and
+            # so group.property("collapsibleHeader").isChecked(), which it
+            # reads) is up to date -- e.g. re-show it on expand if there is
+            # in fact an active warning, or keep it hidden on collapse.
+            self._update_paint_resolution_warning()
+        self._sync_options_list_heights()
+
+    def _wrap_options_sections_reorderable(self, layout: QVBoxLayout) -> "_OptionsSectionsContainer":
+        """Replace the plain top-to-bottom stack of Options group boxes with
+        an _OptionsSectionsContainer so the user can drag-reorder them
+        (2026-09-19 user request, 2nd attempt -- ported from py/map.py's
+        proven ReorderableSidebarSections, since the first attempt's
+        QListWidget-based reordering bounced/glitched for the user),
+        remembering the chosen order across sessions via
+        self._options_settings. Only reparents the group boxes
+        _init_paint_controls()/_init_parcellation_controls() already built
+        and added to *layout* -- their own internal widgets/signals are
+        untouched, so every self.xxx reference elsewhere in this class
+        still points at the same live widget, just under a new parent."""
+        sections = []
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                sections.append(widget)
+
+        container = _OptionsSectionsContainer(self, self)
+        container.setObjectName("OptionsSectionsContainer")
+
+        by_key = {}
+        for i, widget in enumerate(sections):
+            key = widget.property("sectionKey") or f"section_{i}"
+            by_key[str(key)] = widget
+
+        order = self._load_options_section_order(list(by_key.keys()))
+        for key in order:
+            widget = by_key.pop(key, None)
+            if widget is None:
+                continue
+            container.add_section(key, widget)
+        # A group box this saved order predates (or one whose key changed)
+        # still appears, appended at the end rather than silently dropped.
+        for key, widget in by_key.items():
+            container.add_section(key, widget)
+
+        self._options_sections_container = container
+        return container
+
+    def _load_options_section_order(self, available_keys: list) -> list:
+        stored = self._options_settings.value("adjustment/optionsSectionOrder", "")
+        order = [k for k in str(stored).split("|") if k]
+        order = [k for k in order if k in available_keys]
+        order += [k for k in available_keys if k not in order]
+        return order
+
+    def _save_options_section_order(self, container: "_OptionsSectionsContainer"):
+        self._options_settings.setValue(
+            "adjustment/optionsSectionOrder", "|".join(container.order())
+        )
+
+    def _sync_options_list_heights(self):
+        """Ask the Options scroll area to recompute its content size after a
+        section's collapse state changes. With the QVBoxLayout-based
+        _OptionsSectionsContainer (2026-09-19 map.py port) the container's
+        own sizeHint tracks its visible children automatically -- unlike
+        the previous QListWidget, whose per-item sizeHint had to be
+        refreshed by hand on every collapse/expand -- so this just nudges
+        layout invalidation through to the scroll area."""
+        container = getattr(self, "_options_sections_container", None)
+        if container is not None:
+            container.updateGeometry()
+        inner = getattr(self, "_options_inner", None)
+        if inner is not None:
+            inner.updateGeometry()
 
     def _init_paint_controls(self, ui_layout):
         """Region picker, paint target, view sliders, and brush/edit controls."""
-        region_group = QGroupBox("Region picker", self)
+        region_group = QFrame(self)
         region_layout = QVBoxLayout()
+        # Tight spacing/margins (2026-09-19 user request: minimize the row-to-row
+        # gap inside an expanded section) -- Qt's per-style default QVBoxLayout
+        # spacing/margins are noticeably looser than this.
+        region_layout.setSpacing(4)
+        region_layout.setContentsMargins(6, 4, 6, 6)
 
-        # Labels above their fields let every picker box share the group's left
-        # edge, including the disabled CCFv3 Level control.
-        region_layout.addWidget(QLabel("Search:", self))
+        # Each field is a label+control row (2026-09-19 user request: was
+        # label-above-field, stacked vertically -- now one horizontal row
+        # per field). A fixed label width keeps Search/Tier/Level/Area's
+        # controls left-aligned with each other despite "Search"/"Tier"/
+        # "Level"/"Area" being different lengths.
+        # 2026-09-19 follow-up: a flat 40px fixed width clipped "Search:"
+        # (the longest of the four labels) -- sized from the actual font
+        # metrics instead, with a small margin, so every label fits without
+        # truncation regardless of font/DPI, and all four still line up
+        # since they share the same computed width.
+        picker_label_texts = ["Search:", "Tier:", "Level:", "Area:"]
+        picker_label_width = (
+            max(
+                self.fontMetrics().horizontalAdvance(text)
+                for text in picker_label_texts
+            )
+            + 6
+        )
+
+        def _picker_row(label_text: str, field: QWidget) -> QHBoxLayout:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            label = QLabel(label_text, self)
+            label.setFixedWidth(picker_label_width)
+            row.addWidget(label)
+            row.addWidget(field, 1)
+            return row
+
         self.area_search_box.setMinimumWidth(80)
-        region_layout.addWidget(self.area_search_box)
-
-        region_layout.addWidget(QLabel("Tier:", self))
-        region_layout.addWidget(self.tier_combo)
-
-        region_layout.addWidget(QLabel("Level:", self))
-        region_layout.addWidget(self.level_combo)
-
-        region_layout.addWidget(QLabel("Area:", self))
-        region_layout.addWidget(self.area_combo)
+        region_layout.addLayout(_picker_row("Search:", self.area_search_box))
+        region_layout.addLayout(_picker_row("Tier:", self.tier_combo))
+        region_layout.addLayout(_picker_row("Level:", self.level_combo))
+        region_layout.addLayout(_picker_row("Area:", self.area_combo))
 
         region_layout.addWidget(self.ccf_advanced_toggle)
         self.paint_resolution_warning = QLabel("", self)
@@ -2052,11 +3147,16 @@ class AnnotationViewer(QMainWindow):
         self.paint_resolution_warning.setVisible(False)
         region_layout.addWidget(self.paint_resolution_warning)
         region_group.setLayout(region_layout)
-        self._make_group_collapsible(region_group)
+        self._make_group_collapsible(region_group, title="Region picker", draggable=True)
         ui_layout.addWidget(region_group)
 
-        target_group = QGroupBox("Paint target", self)
+        target_group = QFrame(self)
         target_layout = QVBoxLayout()
+        # Tight spacing/margins (2026-09-19 user request: minimize the row-to-row
+        # gap inside an expanded section) -- Qt's per-style default QVBoxLayout
+        # spacing/margins are noticeably looser than this.
+        target_layout.setSpacing(4)
+        target_layout.setContentsMargins(6, 4, 6, 6)
         target_top = QHBoxLayout()
         target_top.addWidget(self.paint_swatch)
         target_top.addWidget(self.paint_target_name, 1)
@@ -2068,12 +3168,18 @@ class AnnotationViewer(QMainWindow):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
         )
         target_layout.addLayout(target_top)
+        target_layout.addWidget(self.paint_target_fullname)
         target_group.setLayout(target_layout)
-        self._make_group_collapsible(target_group)
+        self._make_group_collapsible(target_group, title="Paint target", draggable=True)
         ui_layout.addWidget(target_group)
 
-        view_group = QGroupBox("View", self)
+        view_group = QFrame(self)
         view_layout = QVBoxLayout()
+        # Tight spacing/margins (2026-09-19 user request: minimize the row-to-row
+        # gap inside an expanded section) -- Qt's per-style default QVBoxLayout
+        # spacing/margins are noticeably looser than this.
+        view_layout.setSpacing(4)
+        view_layout.setContentsMargins(6, 4, 6, 6)
         opacity_row = QHBoxLayout()
         opacity_row.addWidget(self.opacity_label)
         opacity_row.addWidget(self.opacity_slider, 1)
@@ -2082,12 +3188,43 @@ class AnnotationViewer(QMainWindow):
         zoom_row.addWidget(self.zoom_label)
         zoom_row.addWidget(self.zoom_slider, 1)
         view_layout.addLayout(zoom_row)
+        # LUT (black/white/gamma) folds independently of Opacity/Zoom above
+        # it (2026-09-19 user request) -- a plain QWidget sub-container
+        # rather than a nested QGroupBox, collapsed with the same
+        # _make_group_collapsible() header pattern via its title= override.
+        lut_container = QWidget(self)
+        lut_layout = QVBoxLayout(lut_container)
+        lut_layout.setContentsMargins(0, 0, 0, 0)
+        lut_layout.setSpacing(4)
+        lut_black_row = QHBoxLayout()
+        lut_black_row.addWidget(self.lut_black_label)
+        lut_black_row.addWidget(self.lut_black_slider, 1)
+        lut_layout.addLayout(lut_black_row)
+        lut_white_row = QHBoxLayout()
+        lut_white_row.addWidget(self.lut_white_label)
+        lut_white_row.addWidget(self.lut_white_slider, 1)
+        lut_layout.addLayout(lut_white_row)
+        lut_gamma_row = QHBoxLayout()
+        lut_gamma_row.addWidget(self.lut_gamma_label)
+        lut_gamma_row.addWidget(self.lut_gamma_slider, 1)
+        lut_layout.addLayout(lut_gamma_row)
+        lut_button_row = QHBoxLayout()
+        lut_button_row.addWidget(self.lut_auto_button)
+        lut_button_row.addWidget(self.lut_reset_button)
+        lut_layout.addLayout(lut_button_row)
+        self._make_group_collapsible(lut_container, title="LUT")
+        view_layout.addWidget(lut_container)
         view_group.setLayout(view_layout)
-        self._make_group_collapsible(view_group)
+        self._make_group_collapsible(view_group, title="View", draggable=True)
         ui_layout.addWidget(view_group)
 
-        brush_group = QGroupBox("Brush & edits", self)
+        brush_group = QFrame(self)
         brush_layout = QVBoxLayout()
+        # Tight spacing/margins (2026-09-19 user request: minimize the row-to-row
+        # gap inside an expanded section) -- Qt's per-style default QVBoxLayout
+        # spacing/margins are noticeably looser than this.
+        brush_layout.setSpacing(4)
+        brush_layout.setContentsMargins(6, 4, 6, 6)
         brush_state_row = QHBoxLayout()
         brush_state_row.addWidget(QLabel("Brush editing:", self))
         brush_state_row.addWidget(self.paint_adjust_badge)
@@ -2135,14 +3272,33 @@ class AnnotationViewer(QMainWindow):
             btn_row.addWidget(button, 1)
         brush_layout.addLayout(btn_row)
         brush_group.setLayout(brush_layout)
+        # Toggle Overlay lives back in the top header toolbar (2026-09-19
+        # user request -- reverting the previous move to sit beside this
+        # section's title: it also left this title no longer flush-left
+        # with the other four sections', since the header_extra wrapper
+        # put the title QToolButton inside a QHBoxLayout sharing the row
+        # instead of the plain layout.insertWidget(0, header) every other
+        # section still uses). See header_toolbar construction above for
+        # self.overlay_toggle's creation.
+        self._make_group_collapsible(
+            brush_group,
+            title="Brush",
+            draggable=True,
+            key="Brush & edits",
+        )
         ui_layout.addWidget(brush_group)
 
         self._paint_controls_group = region_group
 
     def _init_parcellation_controls(self, ui_layout):
         """Parcellation level controls (separate from paint-brush hierarchy)."""
-        group = QGroupBox("Parcellation", self)
+        group = QFrame(self)
         layout = QVBoxLayout()
+        # Tight spacing/margins (2026-09-19 user request: minimize the row-to-row
+        # gap inside an expanded section) -- Qt's per-style default QVBoxLayout
+        # spacing/margins are noticeably looser than this.
+        layout.setSpacing(4)
+        layout.setContentsMargins(6, 4, 6, 6)
 
         self.parcel_status_label = QLabel("", self)
         self.parcel_status_label.setWordWrap(True)
@@ -2241,7 +3397,7 @@ class AnnotationViewer(QMainWindow):
         layout.addWidget(self.parcel_exclude_list)
 
         group.setLayout(layout)
-        self._make_group_collapsible(group)
+        self._make_group_collapsible(group, title="Parcellation", draggable=True)
         ui_layout.addWidget(group)
         self._parcellation_group = group
         # The spacer belongs after the final group.  Placing it before
@@ -2758,6 +3914,202 @@ class AnnotationViewer(QMainWindow):
         self._sync_parcellation_ui_from_metadata()
         self.show_image_with_overlay()
 
+    def _compute_lut(self) -> np.ndarray:
+        """256-entry uint8 lookup table from the current black/white/gamma."""
+        black = self.lut_black
+        white = self.lut_white
+        if white <= black:
+            white = black + 1
+        gamma = max(self.lut_gamma, 1) / 100.0
+        ramp = np.clip(
+            (np.arange(256, dtype=np.float32) - black) / (white - black), 0.0, 1.0
+        )
+        if gamma != 1.0:
+            ramp = np.power(ramp, 1.0 / gamma)
+        return np.clip(ramp * 255.0, 0, 255).astype(np.uint8)
+
+    def _update_lut_labels(self):
+        self.lut_black_label.setText(f"Black {self.lut_black}")
+        self.lut_white_label.setText(f"White {self.lut_white}")
+        self.lut_gamma_label.setText(f"Gamma {self.lut_gamma / 100.0:.2f}")
+
+    def _apply_lut_to_display(self):
+        """Re-render the background image from the cached raw array.
+
+        Applying the LUT (a 256-entry numpy fancy-index, <10ms even on a
+        multi-megapixel preview) and rebuilding the pixmap from the already
+        in-memory array means every slider move is free of disk I/O -- no
+        re-read of the source PNG, matching how opacity/zoom/brush already
+        update without touching disk.
+        """
+        if self._active_channel_array is None:
+            return
+        lut = self._compute_lut()
+        adjusted = lut[self._active_channel_array]
+        pixmap = QPixmap.fromImage(numpy_array_to_qimage(adjusted))
+        pixmap = pixmap.scaled(
+            self.current_label.shape[1],
+            self.current_label.shape[0],
+            Qt.AspectRatioMode.KeepAspectRatio,
+        )
+        self.img_pixmap = pixmap
+        # Preserve the viewport's exact scroll position across this
+        # re-render (2026-09-19 user report, 4th attempt: LUT slider, Seam
+        # Correction toggle, Auto, and Reset all still nudged the slice --
+        # vertically for the slider/toggle, both vertically and
+        # horizontally for Auto/Reset -- despite three earlier fixes aimed
+        # at scene.setSceneRect() itself (a no-op guard, cached pan
+        # margins, and skipping the zoom transform reset).
+        #
+        # Root cause: this method's own capture-then-restore of a *scene*
+        # coordinate (via _viewport_center_scene_pos()/_center_linked_views(),
+        # i.e. QGraphicsView.centerOn()) was not actually the last word on
+        # the viewport's position. show_image_with_overlay(), called in
+        # between, does its own independent capture-then-restore around
+        # rebuilding the annotation pixmap (_set_anno_pixmap() ->
+        # _lock_scene_rect_to_pixmap(anno_scene, ...)) and ends by calling
+        # _apply_zoom(), which re-derives a scrollbar position from
+        # QGraphicsView.centerOn() again. Each centerOn() call maps a
+        # scene-space float back to an integer scrollbar value through the
+        # view's current transform and scrollbar range; if either of those
+        # shifted even slightly between the two nested capture/restore
+        # passes (a real, if small, annotation-scene rect change happens on
+        # every re-render, unlike the background image scene, which mostly
+        # doesn't), the same target scene point can round to a different
+        # achievable pixel each time -- a redundant final centerOn() at the
+        # very end does not undo that, since it recomputes the same
+        # rounding from the same (by-then-already-off) state.
+        #
+        # Saving and restoring the *scrollbar pixel values themselves*
+        # (rather than a scene coordinate that has to be re-mapped through
+        # a transform and range that may have shifted) sidesteps that
+        # rounding entirely: as long as the saved value is still inside the
+        # scrollbar's range after the re-render (true here -- neither the
+        # zoom nor the pixmap's on-screen size changes from this method),
+        # restoring it reproduces the exact former pixel position, with no
+        # coordinate round-trip at all.
+        scrollbar_state = [
+            (
+                view.horizontalScrollBar().value(),
+                view.verticalScrollBar().value(),
+            )
+            for view in (self.img_view, self.anno_view)
+        ]
+        self._set_img_pixmap(pixmap)
+        self.show_image_with_overlay()
+        self._syncing_scroll = True
+        try:
+            for view, (h_value, v_value) in zip(
+                (self.img_view, self.anno_view), scrollbar_state
+            ):
+                view.horizontalScrollBar().setValue(h_value)
+                view.verticalScrollBar().setValue(v_value)
+        finally:
+            self._syncing_scroll = False
+        self._refresh_compare_if_active()
+
+    def _on_lut_black_changed(self, value: int):
+        if value >= self.lut_white_slider.value():
+            value = self.lut_white_slider.value() - 1
+            self.lut_black_slider.blockSignals(True)
+            self.lut_black_slider.setValue(value)
+            self.lut_black_slider.blockSignals(False)
+        self.lut_black = value
+        self._update_lut_labels()
+        self._apply_lut_to_display()
+
+    def _on_lut_white_changed(self, value: int):
+        if value <= self.lut_black_slider.value():
+            value = self.lut_black_slider.value() + 1
+            self.lut_white_slider.blockSignals(True)
+            self.lut_white_slider.setValue(value)
+            self.lut_white_slider.blockSignals(False)
+        self.lut_white = value
+        self._update_lut_labels()
+        self._apply_lut_to_display()
+
+    def _on_lut_gamma_changed(self, value: int):
+        self.lut_gamma = value
+        self._update_lut_labels()
+        self._apply_lut_to_display()
+
+    def _auto_lut(self):
+        """Set Black/White/Gamma from this channel's own pixel statistics.
+
+        2026-09-18 first version stretched black/white to the tissue's
+        1st/99th percentile (restricted to tissue pixels, img > 8 --
+        seam_correct.py's own tissue_threshold=8 -- so slide background
+        doesn't dominate the percentile) and then solved for a gamma that
+        maps the tissue's median brightness to mid-gray after that
+        stretch. 2026-09-19 user report: on their slice this produced
+        black 24 / white 234 / gamma 0.86, which they judged as *less*
+        contrast than what they set by hand -- black 0, white 255 (i.e.
+        no stretch at all), gamma 0.37.
+
+        That comparison says the percentile stretch itself was the wrong
+        move for this kind of image, not just mistuned: narrowing
+        black/white away from the full 0-255 range compresses the
+        histogram's normalized spread that the gamma curve then has to
+        work with, so solving for the same target (median -> mid-gray)
+        against a narrower span needs a *milder* gamma than solving
+        against the full range would -- 0.86 is much closer to 1
+        (identity) than the user's preferred 0.37. Leaving black/white at
+        the identity 0/255 the user actually chose removes that
+        confound entirely: Auto now only ever adjusts gamma, matching
+        the black=0/white=255 half of their stated preference exactly,
+        and picks the gamma value that would have produced their
+        preferred visual effect on a typical slice.
+
+        Gamma: _compute_lut()'s convention is
+        ramp = ((value-black)/(white-black)) ** (1/gamma); with
+        black=0/white=255 that is ramp = (value/255) ** (1/gamma).
+        Solving ramp(median) = 0.5 (map the tissue's own median
+        brightness to mid-gray) gives gamma = ln(x) / ln(0.5) where
+        x = median/255. A median above 128 (x > 0.5, a brighter-skewed
+        tissue histogram) needs gamma < 1 to pull it back down to
+        mid-gray -- consistent with the user's 0.37 preference -- and a
+        median below 128 needs gamma > 1 to lift it. Clamped to the
+        Gamma slider's own range (0.10-3.00)."""
+        if self._active_channel_array is None:
+            return
+        array = self._active_channel_array
+        tissue = array > 8
+        sample = array[tissue] if np.any(tissue) else array
+        median = float(np.median(sample))
+        x = median / 255.0
+        x = min(max(x, 1e-3), 1.0 - 1e-3)
+        gamma = float(np.log(x) / np.log(0.5))
+        gamma = min(max(gamma, 0.10), 3.00)
+        gamma_value = int(round(gamma * 100))
+        self.lut_black = 0
+        self.lut_white = 255
+        self.lut_gamma = gamma_value
+        for slider, value in (
+            (self.lut_black_slider, 0),
+            (self.lut_white_slider, 255),
+            (self.lut_gamma_slider, gamma_value),
+        ):
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+        self._update_lut_labels()
+        self._apply_lut_to_display()
+
+    def _reset_lut(self):
+        self.lut_black = 0
+        self.lut_white = 255
+        self.lut_gamma = 100
+        for slider, value in (
+            (self.lut_black_slider, 0),
+            (self.lut_white_slider, 255),
+            (self.lut_gamma_slider, 100),
+        ):
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+        self._update_lut_labels()
+        self._apply_lut_to_display()
+
     def switch_channel(self, path, display_name, *, display_path=None):
         """Load a low-res background image and refresh the annotation overlay."""
         path = Path(path)
@@ -2767,15 +4119,407 @@ class AnnotationViewer(QMainWindow):
         self.active_channel_display_path = Path(display_path) if display_path else path
         self.active_channel_name = display_name
         with perf_log.perf_section("adjust.channel.load_image"):
-            self.img_pixmap = QPixmap(str(path))
-        self.img_pixmap = self.img_pixmap.scaled(
-            self.current_label.shape[1],
-            self.current_label.shape[0],
-            Qt.AspectRatioMode.KeepAspectRatio,
-        )
-        self._set_img_pixmap(self.img_pixmap)
+            # Read as a raw grayscale array (not straight to QPixmap) so the
+            # brightness/contrast LUT (black/white/gamma, 2026-09-18 user
+            # request) can be re-applied on slider moves without re-reading
+            # the file from disk. All background channel PNGs written by
+            # this pipeline (_previews/*.png, 00_dapi/*.png) are single-
+            # channel 8-bit; IMREAD_GRAYSCALE is a no-op format-wise for
+            # those and a safe fallback for anything else.
+            array = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if array is None:
+            # Missing/corrupt file: fall back to the pre-LUT behavior (a
+            # null QPixmap) rather than raising, matching what a direct
+            # QPixmap(str(path)) load on a bad path already did silently.
+            self._active_channel_array = None
+            self.img_pixmap = QPixmap()
+            self._set_img_pixmap(self.img_pixmap)
+            self._update_section_labels()
+            self.show_image_with_overlay()
+            return
+        self._active_channel_array = array
+        self._apply_lut_to_display()
         self._update_section_labels()
-        self.show_image_with_overlay()
+
+    def _on_compare_adjacent_toggled(self, checked: bool):
+        """Compare Adjacent (2026-09-22 user request): temporarily show an
+        adjacent slice's DAPI in the Annotation pane, read-only, so the
+        user can visually check internal-structure continuity across
+        slices without leaving the current slice or touching its
+        annotation data at all.
+        """
+        if checked:
+            if not self._enter_compare_mode():
+                self.compare_adjacent_toggle.blockSignals(True)
+                self.compare_adjacent_toggle.setChecked(False)
+                self.compare_adjacent_toggle.blockSignals(False)
+            return
+        self._exit_compare_mode()
+
+    def _on_compare_offset_changed(self, _value: int):
+        """Changing the offset while comparing reloads immediately; while
+        not comparing, this only changes what the next toggle-on will
+        show."""
+        if self._compare_mode_active:
+            self._enter_compare_mode()
+
+    def _compare_target_index(self):
+        offset = self.compare_offset_spin.value()
+        if offset == 0:
+            return None
+        target = self.current_index + offset
+        if target < 0 or target >= len(self.pairs):
+            return None
+        return target
+
+    def _enter_compare_mode(self) -> bool:
+        """(Re)load the selected adjacent slice's DAPI into the Annotation
+        pane. Returns False -- leaving any prior compare state untouched --
+        when the selected direction has no adjacent slice (first/last
+        section); callers must not flip the toggle on in that case.
+        """
+        offset = self.compare_offset_spin.value()
+        target = self._compare_target_index()
+        if target is None:
+            if offset == 0:
+                self.status_bar.showMessage(
+                    "Set a nonzero offset to compare against another section."
+                )
+            else:
+                which = "after" if offset > 0 else "before"
+                self.status_bar.showMessage(
+                    f"No section {abs(offset)} slice(s) {which} the current one."
+                )
+            if self._compare_mode_active:
+                # Compare Adjacent was already on and the user dialed the
+                # offset spinbox to a value with no matching slice (e.g.
+                # -2 while already comparing at -1 on the first section).
+                # Hide the comparison layer instead of silently leaving the
+                # previous offset's image on screen (2026-09-22 user
+                # request) -- this reveals the real current-slice
+                # annotation underneath (2026-09-23: it is a separate
+                # item now, always kept current -- see
+                # _set_compare_pixmap()), not a blank pane.
+                self._hide_compare_pixmap()
+            self._compare_adjacent_label_array = None
+            self._compare_adjacent_slice_id = None
+            self._compare_pixmap_offset = (0, 0)
+            self._compare_pixmap_native_size = (0, 0)
+            return False
+
+        _, adjacent_anno_path, adjacent_slice_id = self.pairs[target]
+        self._compare_adjacent_slice_id = adjacent_slice_id
+        channel_sources = lowres_channels_for_slice(
+            self.images_dir,
+            adjacent_slice_id,
+            self.previews_dir,
+            self._preview_channel_index,
+        )
+        if not channel_sources:
+            self.status_bar.showMessage(
+                f"No preview channels found for {adjacent_slice_id}."
+            )
+            return False
+
+        # Prefer the channel currently shown in the main DAPI pane so the
+        # comparison is apples-to-apples; fall back to DAPI, then whatever
+        # is first, the same fallback order rebuild_channel_combo() uses.
+        active_name = getattr(self, "active_channel_name", None)
+        path = None
+        for name, candidate_path in channel_sources:
+            if active_name and name == active_name:
+                path = candidate_path
+                break
+        if path is None:
+            for name, candidate_path in channel_sources:
+                if name in ("DAPI", "DAPI (pipeline)", "Dapi"):
+                    path = candidate_path
+                    break
+        if path is None:
+            path = channel_sources[0][1]
+
+        # Mirror Seam Correction onto the comparison image too (2026-09-23
+        # user request): previously this always read the adjacent slice's
+        # plain preview PNG, so turning Seam Correction on/off for the
+        # current slice re-rendered the comparison pane (via
+        # _refresh_compare_if_active(), called from switch_channel() ->
+        # _apply_lut_to_display()) but always with the same uncorrected
+        # source -- the seam fix itself never actually reached this image.
+        # Reuses the same live-correction cache as the main pane
+        # (_dapi_live_cache/_cached_dapi_live_path), just keyed by the
+        # adjacent slice's own id instead of the current one.
+        if (
+            getattr(self, "seam_channel_toggle", None) is not None
+            and self.seam_channel_toggle.isChecked()
+        ):
+            cached = self._cached_dapi_live_path(adjacent_slice_id, path)
+            if cached is not None:
+                path = cached
+            else:
+                live_path = self._compute_seam_live_for_slice(
+                    path, adjacent_slice_id
+                )
+                if live_path is not None:
+                    self._dapi_live_cache[
+                        self._dapi_live_cache_key(adjacent_slice_id, path)
+                    ] = live_path
+                    path = live_path
+                # On failure, fall through and show the plain preview
+                # rather than failing the whole comparison.
+
+        array = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if array is None:
+            self.status_bar.showMessage(
+                f"Could not load DAPI image for {adjacent_slice_id}."
+            )
+            return False
+
+        # Reuse the main pane's current LUT (black/white/gamma) so the
+        # comparison image's contrast matches what's already on screen,
+        # instead of showing the adjacent slice at raw/default brightness.
+        lut = self._compute_lut()
+        adjusted = lut[array]
+
+        # DAPI+annotation composite (2026-09-22 user request): blend in the
+        # adjacent slice's own colored label overlay, the same way the
+        # main DAPI pane blends its overlay in, instead of showing bare
+        # DAPI. Respects the Toggle Overlay checkbox (self.overlay_visible)
+        # and the current Opacity slider, matching what the main pane
+        # would show for that slice. Falls back to plain DAPI on any
+        # problem loading/sizing the adjacent label (e.g. a slice with no
+        # saved annotation yet) rather than failing the whole comparison.
+        composite = adjusted
+        # Load the adjacent slice's own label array unconditionally (not
+        # only when the overlay is visible): right-clicking in the
+        # comparison pane to pick a paint target (2026-09-22 user request)
+        # needs it regardless of whether the colored overlay is currently
+        # drawn on top.
+        adjacent_label_array = None
+        try:
+            with open(adjacent_anno_path, "rb") as f:
+                adjacent_label = pickle.load(f)
+            adjacent_label_array = np.array(adjacent_label, dtype=np.uint32)
+        except Exception:
+            adjacent_label_array = None
+        self._compare_adjacent_label_array = adjacent_label_array
+        if self.overlay_visible and adjacent_label_array is not None:
+            try:
+                overlay_rgba = self._build_label_overlay_rgba(adjacent_label_array)
+                if overlay_rgba.shape[:2] != adjusted.shape[:2]:
+                    overlay_rgba = cv2.resize(
+                        overlay_rgba,
+                        (adjusted.shape[1], adjusted.shape[0]),
+                        interpolation=cv2.INTER_NEAREST,
+                    )
+                dapi_bgr = cv2.cvtColor(adjusted, cv2.COLOR_GRAY2BGR)
+                blend = (overlay_rgba[..., 3].astype(np.float32) / 255.0) * (
+                    self.opacity / 255.0
+                )
+                blended = (
+                    dapi_bgr.astype(np.float32) * (1.0 - blend[..., None])
+                    + overlay_rgba[..., :3].astype(np.float32) * blend[..., None]
+                )
+                # overlay_rgba's first 3 channels are (B, G, R) (matches Qt
+                # ARGB32, see _build_label_overlay_rgba); numpy_array_to_qimage
+                # expects RGB order for a 3-channel array, so swap here.
+                composite = np.ascontiguousarray(
+                    blended.astype(np.uint8)[:, :, ::-1]
+                )
+            except Exception:
+                composite = adjusted
+
+        # Highlight the currently selected paint target within the
+        # adjacent slice's own annotation (2026-09-23 user request):
+        # mirrors repaint_selected_only()'s highlight for the current
+        # slice's DAPI/Annotation pane, but looked up in
+        # adjacent_label_array instead of current_label, so a paint
+        # target selected while comparing (or one already selected
+        # before Compare Adjacent was turned on) shows where it falls on
+        # the adjacent tissue too, not just on the current slice.
+        if self.selected_region_id is not None and adjacent_label_array is not None:
+            sel_mask = adjacent_label_array == self.selected_region_id
+            if sel_mask.any():
+                if composite.ndim == 2:
+                    composite = cv2.cvtColor(composite, cv2.COLOR_GRAY2BGR)
+                if sel_mask.shape != composite.shape[:2]:
+                    sel_mask = cv2.resize(
+                        sel_mask.astype(np.uint8),
+                        (composite.shape[1], composite.shape[0]),
+                        interpolation=cv2.INTER_NEAREST,
+                    ).astype(bool)
+                composite = composite.copy()
+                # (214, 112, 218) BGR == QColor(218, 112, 214) RGB, the
+                # same highlight color repaint_selected_only() paints with.
+                composite[sel_mask] = (214, 112, 218)
+
+        pixmap = QPixmap.fromImage(numpy_array_to_qimage(composite))
+        if self.current_label is not None:
+            # Draw at native size, no scaling at all (2026-09-23, third
+            # user report): the letterbox fix (scale-to-fit +
+            # center-on-canvas) removed the stretching but still resized
+            # the adjacent slice to current_label's box, and adjacent
+            # sections in this pipeline routinely have a genuinely
+            # different registered pixel size *and* aspect ratio from the
+            # current one (confirmed against real project data -- e.g.
+            # (634, 310) vs (634, 508) for two sections four apart in the
+            # same align leaf), not just a preview-quality mismatch. Both
+            # panes already treat 1 image pixel == 1 scene unit with a
+            # shared (0, 0) origin (img_pixmap for the current slice is
+            # built the same way -- see _apply_lut_to_display()), so the
+            # only way to actually match the current image's scale and
+            # position -- as opposed to an arbitrary box -- is to *not*
+            # rescale the adjacent image at all: place it at its own
+            # native resolution, anchored at the same (0, 0) origin
+            # current_label uses, and let the linked-view pan/zoom (which
+            # already operates in shared scene coordinates, see
+            # _center_linked_views()) line the two up. An opaque
+            # background sized to cover at least current_label's box is
+            # still needed underneath so the real annotation item
+            # (z-order below this one, see _set_compare_pixmap()) never
+            # shows through at the edges; it now only pads, never shrinks
+            # or stretches the visible picture.
+            target_w = self.current_label.shape[1]
+            target_h = self.current_label.shape[0]
+            native_w = pixmap.width()
+            native_h = pixmap.height()
+            canvas_w = max(target_w, native_w)
+            canvas_h = max(target_h, native_h)
+            # Where the native picture sits *within the canvas pixmap's own
+            # raster* (only nonzero when the canvas is padded out to
+            # target's box because native is the smaller one on that axis).
+            intra_offset_x = (canvas_w - native_w) // 2
+            intra_offset_y = (canvas_h - native_h) // 2
+            # Where the *canvas itself* sits in the scene, relative to the
+            # shared (0, 0) origin current_label's own box uses (2026-09-23
+            # user report: when native is *larger* than target on an axis,
+            # canvas equals native on that axis and this compare item was
+            # always left positioned at the scene origin regardless --
+            # correct for the smaller-native case, where canvas equals
+            # target and so already starts at the same origin, but wrong
+            # here: current_label's box, and so the shared linked-pan
+            # center DAPI/Annotation both center on, is target_w/2 x
+            # target_h/2 -- a point strictly inside the larger picture,
+            # not at its center. Anchoring the canvas at the scene origin
+            # regardless left the picture's own true center to the
+            # bottom-right of that shared center point, which is exactly
+            # the top-left-anchored skew reported). Centering the canvas
+            # itself on the same (target_w/2, target_h/2) point fixes
+            # both cases with one formula: it's 0 (no shift) whenever
+            # canvas already equals target (the smaller-native case,
+            # unchanged from before), and negative -- shifting the canvas
+            # left/up so its own center lines up with target's -- whenever
+            # canvas is larger (the native-larger case this fixes).
+            item_x = (target_w - canvas_w) // 2
+            item_y = (target_h - canvas_h) // 2
+            # Recorded regardless of whether padding is actually needed
+            # this time (offset stays (0, 0) then) -- _select_paint_target_
+            # at_view_pos() reads these on every right-click while
+            # comparing, so they must always reflect this render, not just
+            # whichever offset queue entry / prior comparison last needed
+            # padding. Stored as the native picture's total position in
+            # *scene* coordinates (item position plus its position within
+            # the canvas raster), not just the intra-canvas part, so every
+            # consumer of _compare_pixmap_offset keeps working unchanged
+            # regardless of where the canvas item itself now sits.
+            self._compare_pixmap_offset = (
+                item_x + intra_offset_x,
+                item_y + intra_offset_y,
+            )
+            self._compare_pixmap_native_size = (native_w, native_h)
+            if native_w != canvas_w or native_h != canvas_h:
+                # Center the native-size picture on the padded canvas, and
+                # center the canvas itself on current_label's own box
+                # (2026-09-23 user reports, two follow-ups): anchoring
+                # everything at (0, 0) put all of the padding on the
+                # right/bottom for a smaller reference image, and left a
+                # larger one skewed toward the bottom-right of the shared
+                # view center -- see item_x/item_y above for the second
+                # part. Neither centering step affects distortion (the
+                # picture is still drawn at its own native size, unscaled)
+                # or bleed-through (the canvas is still >= current_label's
+                # box on both axes and still opaque, so it still fully
+                # covers the real annotation item beneath it, see
+                # _set_compare_pixmap()).
+                #
+                # The padding margin (when native is the smaller one) has
+                # no pixel of its own in the adjacent slice's annotation at
+                # all -- it exists only because the reference image is
+                # smaller than current_label's box. 2026-09-23 user request
+                # (reconsidered, same day): treated as Lost in Warp, then
+                # plain black -- now matches the DAPI/Annotation panes' own
+                # pan-margin background instead, since that margin is
+                # conceptually the same thing ("no image here") and a
+                # hardcoded black no longer agreed with it visually. Read
+                # directly from the viewport's own palette/backgroundRole
+                # rather than hardcoding a color, so this keeps matching
+                # automatically if the app's theme (or a future dark/light
+                # toggle) ever changes it.
+                viewport = self.anno_view.viewport()
+                outside_area_color = viewport.palette().color(
+                    viewport.backgroundRole()
+                )
+                canvas = QPixmap(canvas_w, canvas_h)
+                canvas.fill(outside_area_color)
+                painter = QPainter(canvas)
+                painter.drawPixmap(intra_offset_x, intra_offset_y, pixmap)
+                painter.end()
+                pixmap = canvas
+        else:
+            item_x = item_y = 0
+
+        if not self._compare_mode_active:
+            # First entry this round. Allow Adjustment is deliberately
+            # left as-is (2026-09-22 user request): the current slice
+            # must stay editable while comparing, e.g. via the DAPI
+            # pane. Painting is still blocked specifically on the
+            # comparison pane itself -- see the MouseButtonPress guard
+            # in eventFilter() -- since that pane is temporarily showing
+            # a different slice's image, not the current annotation.
+            if not self.annotation_map_toggle.isChecked():
+                # The Annotation map pane is hidden; show it so the
+                # comparison is actually visible (2026-09-22 user
+                # request), and remember to hide it again on exit.
+                self._compare_prev_annotation_map_checked = False
+                self.annotation_map_toggle.setChecked(True)
+            self._compare_mode_active = True
+
+        self._set_compare_pixmap(pixmap)
+        self._compare_pixmap_item.setPos(item_x, item_y)
+        what = "DAPI + annotation" if self.overlay_visible else "DAPI"
+        self.status_bar.showMessage(
+            f"Comparing: {adjacent_slice_id} {what} (comparison pane is "
+            "read-only) -- toggle "
+            '"Compare Adjacent" off to return to the annotation map.'
+        )
+        return True
+
+    def _exit_compare_mode(self):
+        if not self._compare_mode_active:
+            return
+        self._compare_mode_active = False
+        self._compare_adjacent_label_array = None
+        self._compare_adjacent_slice_id = None
+        self._compare_pixmap_offset = (0, 0)
+        self._compare_pixmap_native_size = (0, 0)
+        self._hide_compare_pixmap()
+        if self._compare_prev_annotation_map_checked is False:
+            self.annotation_map_toggle.setChecked(False)
+        self._compare_prev_annotation_map_checked = None
+        self.refresh_drawings()
+        self.status_bar.clearMessage()
+
+    def _refresh_compare_if_active(self):
+        """Re-render the Compare Adjacent pane against the current
+        offset/channel/LUT/overlay settings (2026-09-23 user request):
+        channel switches, Toggle Overlay, and the black/white/gamma
+        sliders all affect what the main DAPI pane shows, and the
+        comparison pane is meant to mirror that -- see the "reuse the
+        main pane's LUT/channel" comment in _enter_compare_mode(). Call
+        sites that already affect the main pane call this afterward so
+        the comparison stays in sync instead of freezing at whatever it
+        looked like when Compare Adjacent was first turned on."""
+        if self._compare_mode_active:
+            self._enter_compare_mode()
 
     def refresh_drawings(self):
         """Redraw annotation overlay from current_label without changing region IDs."""
@@ -2800,6 +4544,21 @@ class AnnotationViewer(QMainWindow):
         value = max(50, min(1000, self.zoom_slider.value() + delta_percent))
         self._apply_zoom(value)
 
+    def _nudge_brush(self, delta: int):
+        """Shrink/enlarge the paint brush via keyboard ('-'/'=').
+
+        Mirrors _nudge_zoom()'s guard/clamp shape -- disabled mid-stroke or
+        mid-pan/text-entry, clamped to brush_slider's own range so a fast
+        key-repeat can never push brush_size out of bounds.
+        """
+        if not self._view_shortcuts_allowed():
+            return
+        value = max(
+            self.brush_slider.minimum(),
+            min(self.brush_slider.maximum(), self.brush_slider.value() + delta),
+        )
+        self.brush_slider.setValue(value)
+
     def _pan_views(self, fx: float, fy: float):
         """Pan both panes by ~20% of the visible viewport."""
         if not self._view_shortcuts_allowed():
@@ -2810,17 +4569,34 @@ class AnnotationViewer(QMainWindow):
         self._pan_by_pixels(dx, dy)
 
     def _pan_by_pixels(self, dx: int, dy: int):
-        """Pan both panes by a shared scene-coordinate delta.
+        """Pan both panes by a shared viewport-pixel delta.
 
-        This does not depend on equal scrollbar ranges, so it also works for
-        a fit-to-window DAPI image and after the user changes splitter ratio.
+        Adjusts each view's own QScrollBar value directly -- exact integer
+        arithmetic, no scene-coordinate round trip -- instead of re-deriving
+        a scene "center" point via _viewport_center_scene_pos() and
+        re-applying centerOn() to both views (2026-09-23 user report:
+        right-click drag-pan drifted toward the top-left over the course of
+        a drag). _viewport_center_scene_pos() is built on QRect.center(),
+        which integer-truncates for an even viewport size -- a half-pixel
+        bias already documented as a drift source for _apply_zoom() and
+        _sync_scroll_from() (see their comments), both of which re-center
+        only once per user action. This call site re-centered on *every*
+        mouse-move event of a drag, so the same half-pixel bias compounded
+        every few pixels of movement into a visible directional drift
+        instead of a one-off pixel or two. QScrollBar values are already in
+        viewport-pixel units, so dx/dy need no scale conversion either.
         """
         if dx == 0 and dy == 0:
             return
-        scale = max(self.zoom_level / 100.0, 0.01)
-        center = self._viewport_center_scene_pos(self.img_view)
-        center = center + QPointF(dx / scale, dy / scale)
-        self._center_linked_views(center)
+        self._syncing_scroll = True
+        try:
+            for view in (self.img_view, self.anno_view):
+                hbar = view.horizontalScrollBar()
+                vbar = view.verticalScrollBar()
+                hbar.setValue(hbar.value() + dx)
+                vbar.setValue(vbar.value() + dy)
+        finally:
+            self._syncing_scroll = False
 
     def keyPressEvent(self, event):
         super().keyPressEvent(event)
@@ -2853,22 +4629,127 @@ class AnnotationViewer(QMainWindow):
 
     def _install_view_shortcuts(self):
         def bind(keys, slot):
+            created = []
             for key in keys:
                 sc = QShortcut(QKeySequence(key), self)
                 sc.setContext(Qt.ShortcutContext.WindowShortcut)
                 sc.activated.connect(slot)
+                created.append(sc)
+            return created
 
-        bind(["-", "Minus", "KeypadMinus"], lambda: self._nudge_zoom(-10))
-        bind(["=", "+", "Plus", "KeypadPlus"], lambda: self._nudge_zoom(10))
+        # '-'/'=' are the brush size shortcuts (2026-09-18 user request);
+        # zoom in/out moved to '['/']' to free them up. Plain scroll-wheel
+        # zoom over the image/label views (see eventFilter's Wheel handling)
+        # is unaffected and remains the primary way to zoom.
+        bind(["[", "BracketLeft"], lambda: self._nudge_zoom(-10))
+        bind(["]", "BracketRight"], lambda: self._nudge_zoom(10))
+        bind(["-", "Minus", "KeypadMinus"], lambda: self._nudge_brush(-1))
+        bind(["=", "+", "Plus", "KeypadPlus"], lambda: self._nudge_brush(1))
         bind(["Left"], lambda: self._pan_views(-1, 0))
         bind(["Right"], lambda: self._pan_views(1, 0))
         bind(["Up"], lambda: self._pan_views(0, -1))
         bind(["Down"], lambda: self._pan_views(0, 1))
         bind(["Delete", "Backspace"], self._fill_selected_label_with_liw)
+        # Toggle Overlay shortcut (2026-09-19 user request). Guarded by
+        # _view_shortcuts_allowed() like the other bindings above -- Tab is
+        # also the standard focus-advance key, so this must not fire while
+        # a text field (e.g. the Go to... dialog, a spin box) has focus and
+        # the user is just tabbing between fields.
+        overlay_shortcuts = bind(["Tab"], self._toggle_overlay_shortcut)
+        # Annotation map shortcut (2026-09-19 user request).
+        annotation_map_shortcuts = bind(
+            ["`", "QuoteLeft", "AsciiTilde"], self._toggle_annotation_map_shortcut
+        )
+        # Undo shortcut (2026-09-20 user request): Ctrl+Z mirrors the Undo
+        # button (undo_last_delta()). Guarded by _view_shortcuts_allowed()
+        # like most other bindings above (not the Toggle Overlay-style
+        # bypass) -- unlike toggling overlay visibility, undoing a delta
+        # mutates current_label/deltas/originals, which is exactly the
+        # kind of state a mid-stroke is_drawing or an active pan drag must
+        # not be interrupted by. Also folded into
+        # _text_focus_dedicated_shortcuts below: Ctrl+Z is QLineEdit's own
+        # built-in text-undo shortcut, so this QShortcut must be disabled
+        # while a text field has focus, the same way Tab/backtick are,
+        # or it would eat the keystroke before the QLineEdit's native
+        # undo ever sees it.
+        undo_shortcuts = bind(["Ctrl+Z"], self._undo_shortcut)
+        # 2026-09-19 follow-up: the guard functions above only skip *acting*
+        # on Tab/backtick while a text field has focus -- they don't stop
+        # the QShortcut itself from consuming the keystroke first. A plain
+        # QShortcut with WindowShortcut context intercepts a matching key
+        # before it ever reaches the focused widget, so while typing in
+        # (say) the Region picker's Search box, Tab silently failed to
+        # advance focus and "`" silently failed to type its character --
+        # both keys were "used only as shortcuts" in the wrong sense: they
+        # ate the keystroke even when guarded out, rather than falling
+        # back to their normal behavior. Fix: track these specific
+        # QShortcut objects and toggle .setEnabled() on focus changes --
+        # disabled, a QShortcut does not intercept its key at all, so the
+        # keystroke reaches the focused widget exactly as if no shortcut
+        # were registered, restoring normal Tab-advance / literal "`"
+        # typing there. Outside any text field they stay enabled, so
+        # nothing changes about how they behave elsewhere in the window.
+        self._text_focus_dedicated_shortcuts = (
+            overlay_shortcuts + annotation_map_shortcuts + undo_shortcuts
+        )
+        self._sync_text_focus_dedicated_shortcuts()
+        QApplication.instance().focusChanged.connect(
+            self._sync_text_focus_dedicated_shortcuts
+        )
+
+    def _sync_text_focus_dedicated_shortcuts(self, *_args):
+        enabled = not self._text_input_focused()
+        for sc in getattr(self, "_text_focus_dedicated_shortcuts", []):
+            sc.setEnabled(enabled)
+
+    def _toggle_overlay_shortcut(self):
+        # 2026-09-19 user request: unlike the other view shortcuts, Toggle
+        # Overlay should still fire mid-brush-stroke (self.is_drawing) --
+        # toggling the overlay pixmap's visibility doesn't touch
+        # current_label or the in-progress stroke, it only hides/shows the
+        # QGraphicsPixmapItem, so there's nothing unsafe about it firing
+        # while painting. Deliberately does NOT reuse
+        # _view_shortcuts_allowed() (that still guards the other shortcuts
+        # against is_drawing) -- only view panning and text-field focus are
+        # still checked here, both of which remain genuine conflicts (a
+        # panning drag has its own left/middle-button semantics; a focused
+        # text field should keep every bare-key shortcut, including this
+        # one, out of its way).
+        if self._is_panning or self._text_input_focused():
+            return
+        self.toggle_overlay()
+
+    def _toggle_annotation_map_shortcut(self):
+        if not self._view_shortcuts_allowed():
+            return
+        self.annotation_map_toggle.toggle()
+
+    def _undo_shortcut(self):
+        if not self._view_shortcuts_allowed():
+            return
+        self.undo_last_delta()
 
     def update_brush(self):
         self.brush_size = self.brush_slider.value()
         self._update_paint_target_strip()
+        self._refresh_brush_cursor_at_mouse()
+
+    def _refresh_brush_cursor_at_mouse(self) -> None:
+        """Redraw the brush-size ring at the cursor's current position.
+
+        _update_brush_cursor() is normally only called from eventFilter()'s
+        mouse-move handling, so a brush-size change from something other
+        than mouse movement (the -/= keyboard shortcuts added 2026-09-18,
+        or a manual slider drag while the mouse sits still over the image)
+        left the visible ring at its old size until the mouse next moved.
+        Locates whichever pane (img_view/anno_view) the cursor currently
+        sits over from the global cursor position and re-issues the same
+        update eventFilter() would have made."""
+        for view in (self.img_view, self.anno_view):
+            local_pos = view.viewport().mapFromGlobal(QCursor.pos())
+            if view.viewport().rect().contains(local_pos):
+                self._update_brush_cursor(view, view.mapToScene(local_pos))
+                return
 
     def convert_to_parents(self):
         """Quick rollup: cortical layers → functional areas (this section only)."""
@@ -2903,15 +4784,18 @@ class AnnotationViewer(QMainWindow):
             button.blockSignals(False)
         self._set_img_overlay_layer(self._display_overlay_pixmap())
         self.repaint_selected_only()
+        self._refresh_compare_if_active()
 
-    def show_image_with_overlay(self):
-        center = self._viewport_center_scene_pos(self.img_view)
-        label_array = np.array(self._label_for_display(), dtype=np.uint32)
-        # Build the colored overlay by mapping label -> color with a vectorized
-        # lookup (searchsorted + gather) instead of a per-label / per-pixel
-        # QPainter.drawPoints loop, which was O(pixels x labels) in Python.
-        # Byte order matches Qt RGB32 (B, G, R, A) so the downstream
-        # qimage/add_outlines pipeline is unchanged.
+    def _build_label_overlay_rgba(self, label_array):
+        """Map a label array to a colored BGRA overlay (Qt ARGB32 byte
+        order: B, G, R, A) with 1px boundary outlines between regions.
+
+        Factored out of show_image_with_overlay() (2026-09-22) so Compare
+        Adjacent can build the same colored overlay for an *adjacent*
+        slice's label array -- reusing this instead of re-deriving the
+        label-color lookup keeps both call sites in sync with
+        resolve_label_color()/add_outlines() automatically.
+        """
         with perf_log.perf_section("adjust.overlay.build"):
             present = np.unique(label_array)
             table = np.zeros((present.shape[0], 4), dtype=np.uint8)
@@ -2924,9 +4808,49 @@ class AnnotationViewer(QMainWindow):
                     )[:3]
                     table[i] = (b, g, r, 255)
             idx = np.searchsorted(present, label_array)
-            anno_as_array = np.ascontiguousarray(table[idx])
+            overlay_rgba = np.ascontiguousarray(table[idx])
         with perf_log.perf_section("adjust.overlay.outlines"):
-            anno_as_array = add_outlines(label_array, anno_as_array)
+            overlay_rgba = add_outlines(label_array, overlay_rgba)
+        return overlay_rgba
+
+    def show_image_with_overlay(self):
+        # Preserve the viewport's exact scroll position across this rebuild
+        # (2026-09-19 user report, 2nd round: Refresh and Undo -- both call
+        # this method directly, not through _apply_lut_to_display() -- still
+        # drifted the slice's on-screen position even after that method's
+        # own fix for the LUT slider/Seam toggle/Auto/Reset case). Same root
+        # cause, same fix: save each view's raw scrollbar pixel values
+        # up front and restore them byte-exact at the very end, instead of
+        # the scene-coordinate capture/centerOn() round-trip below (which
+        # this method still uses for its own internal purposes -- restoring
+        # the saved values afterward simply overrides whatever that
+        # round-trip's rounding produced). See _apply_lut_to_display()'s
+        # docstring for the full explanation of why centerOn() alone isn't
+        # enough.
+        #
+        # Skipped on this call being the very first display for this scene
+        # (self._pan_scene_initialized still False below): there is no
+        # prior position to preserve yet, and the explicit image-center
+        # centerOn() a few lines down is the intended initial placement,
+        # not drift to undo.
+        # A pending size-change recentre (see _load_section_at()) overrides
+        # the usual scroll-preserving behavior for this one call only --
+        # the old scrollbar pixel values belong to the previous slice's
+        # (differently sized) image and no longer mean the same on-screen
+        # position on this one.
+        force_recenter = self._recenter_next_render
+        preserve_scroll = self._pan_scene_initialized and not force_recenter
+        if preserve_scroll:
+            scrollbar_state = [
+                (
+                    view.horizontalScrollBar().value(),
+                    view.verticalScrollBar().value(),
+                )
+                for view in (self.img_view, self.anno_view)
+            ]
+        center = self._viewport_center_scene_pos(self.img_view)
+        label_array = np.array(self._label_for_display(), dtype=np.uint32)
+        anno_as_array = self._build_label_overlay_rgba(label_array)
         self._anno_rgba = anno_as_array  # cache for incremental stroke refresh
         anno_image = numpy_array_to_qimage(anno_as_array)
         self.anno_pixmap = QPixmap.fromImage(anno_image)
@@ -2946,7 +4870,23 @@ class AnnotationViewer(QMainWindow):
                 self.img_pixmap.height() / 2.0,
             )
             self._pan_scene_initialized = True
+        elif force_recenter and not self.img_pixmap.isNull():
+            center = QPointF(
+                self.img_pixmap.width() / 2.0,
+                self.img_pixmap.height() / 2.0,
+            )
+        self._recenter_next_render = False
         self._apply_zoom(self.zoom_level, center_scene_pos=center)
+        if preserve_scroll:
+            self._syncing_scroll = True
+            try:
+                for view, (h_value, v_value) in zip(
+                    (self.img_view, self.anno_view), scrollbar_state
+                ):
+                    view.horizontalScrollBar().setValue(h_value)
+                    view.verticalScrollBar().setValue(v_value)
+            finally:
+                self._syncing_scroll = False
 
     def _finalize_stroke_overlay(self, x0, y0, x1, y1):
         """Rebuild the overlay only inside the stroke bounding box (plus a small
@@ -3102,12 +5042,45 @@ class AnnotationViewer(QMainWindow):
                 set_suppressed(KEY_CONFIRM_SAVE_OVERWRITE, True)
 
         # Save the current label
-        _, anno_path, _ = self.pairs[self.current_index]
+        _, anno_path, slice_id = self.pairs[self.current_index]
+        if self.current_label is not None and not np.any(self.current_label):
+            if not self._confirm_save_empty_annotation(slice_id):
+                return
         with open(anno_path, "wb") as f:
             pickle.dump(self.current_label, f)
         self.was_changed = False
         self._update_parcellation_labels()
         self._refresh_annotation_label_audit_cache(show_intensity_notice=True)
+
+    def _confirm_save_empty_annotation(self, slice_id: str) -> bool:
+        """Block silently overwriting a saved annotation with an all-background
+        one (2026-09-23: M581-01(50)/(51)/(52)/(64) lost all labeled regions
+        this way -- most likely several uses of the Delete/Backspace "fill
+        selected region with Lost in Warp" shortcut across most regions on
+        each section, then Save/"Save" on the unsaved-changes prompt, with no
+        warning that the result was now fully empty). Always shown regardless
+        of the KEY_CONFIRM_SAVE_OVERWRITE "don't ask again" setting, since
+        that setting is about the routine "this overwrites the file" notice,
+        not about this specific data-loss shape."""
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setWindowTitle("Annotation is empty")
+        dialog.setText(
+            f"{slice_id}: this annotation has no labeled regions at all "
+            "(100% background)."
+        )
+        dialog.setInformativeText(
+            "Saving now will overwrite the saved annotation file with a "
+            "completely empty one. If this is unexpected, click Cancel and "
+            "check whether regions were accidentally cleared (e.g. with "
+            "Delete/Backspace), or use Restore Fine Parcellation to recover "
+            "from the full-detail backup if one exists."
+        )
+        dialog.setStandardButtons(
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel
+        )
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        return dialog.exec() == QMessageBox.StandardButton.Save
 
     def _refresh_annotation_label_audit_cache(self, show_intensity_notice: bool = False):
         from annotation_label_audit import (
@@ -3157,7 +5130,22 @@ class AnnotationViewer(QMainWindow):
         """Load and display the section at ``index`` (shared by prev/next/goto)."""
         if index < 0 or index >= len(self.pairs):
             return
+        # Compare Adjacent stays on across navigation (2026-09-23 user
+        # request): remember it was active and refresh it against the
+        # *new* current section (same offset) at the end of this method,
+        # instead of dropping out of compare mode on every prev/next/goto.
+        was_comparing = self._compare_mode_active
         self._cancel_dapi_prefetch()
+        # 2026-09-23 user request: recentre on the new slice's image
+        # whenever its pixel size differs from the one just displayed --
+        # captured before rebuild_channel_combo() below overwrites
+        # self.img_pixmap with the new slice's image, so this is really
+        # the *previous* slice's size at the moment of comparison.
+        prev_img_size = (
+            (self.img_pixmap.width(), self.img_pixmap.height())
+            if self.img_pixmap is not None and not self.img_pixmap.isNull()
+            else None
+        )
         self.current_index = index
         _, anno_path, slice_id = self.pairs[self.current_index]
         with perf_log.perf_section("adjust.nav.load_label"):
@@ -3173,8 +5161,21 @@ class AnnotationViewer(QMainWindow):
         self._sync_parcellation_ui_from_metadata()
         with perf_log.perf_section("adjust.nav.rebuild_channels"):
             self.rebuild_channel_combo()
+        new_img_size = (
+            (self.img_pixmap.width(), self.img_pixmap.height())
+            if self.img_pixmap is not None and not self.img_pixmap.isNull()
+            else None
+        )
+        if (
+            prev_img_size is not None
+            and new_img_size is not None
+            and prev_img_size != new_img_size
+        ):
+            self._recenter_next_render = True
         with perf_log.perf_section("adjust.nav.render"):
             self.show_image_with_overlay()
+        if was_comparing:
+            self._enter_compare_mode()
 
     def prev_image(self):
         if self.current_index > 0:
@@ -3215,7 +5216,29 @@ class AnnotationViewer(QMainWindow):
         scene_point = QPoint(int(scene_point.x()), int(scene_point.y()))
         return scene_point
 
-    def update_status_bar_with_region(self, pos):
+    def update_status_bar_with_region(self, pos, view=None):
+        # Compare Adjacent (2026-09-23 user report): hovering the
+        # comparison pane must show *that* slice's region under the
+        # cursor, not the current slice's -- previously this always read
+        # self.current_label regardless of which pane triggered it, so
+        # the status bar kept reporting the current annotation even while
+        # the comparison picture was what the pointer was actually over.
+        if (
+            self._compare_mode_active
+            and view is self.anno_view
+            and self._compare_adjacent_label_array is not None
+        ):
+            label_value = self._compare_adjacent_label_at(pos)
+            if label_value is None:
+                return
+            region_name = self.structure_map.get(label_value, {}).get(
+                "name", "Unknown region"
+            )
+            slice_id = self._compare_adjacent_slice_id or "adjacent slice"
+            self.status_bar.showMessage(
+                f"{slice_id} (Compare Adjacent) region: {region_name}"
+            )
+            return
         if (
             pos.x() < 0
             or pos.y() < 0
@@ -3391,7 +5414,20 @@ class AnnotationViewer(QMainWindow):
             self.show_image_with_overlay()
 
     def repaint_selected_only(self):
-        """Repaint the selected region only"""
+        """Repaint the selected region only.
+
+        Vectorized bounding-box patch instead of a per-pixel
+        QPainter.drawPoints loop (2026-09-18 user report: selecting "Lost
+        in Warp" as the paint target was slow). The old loop built one
+        QPoint Python object per matching pixel -- O(matched pixels) in
+        pure Python, not numpy -- which was tolerable for a small
+        anatomical region but very slow for LIW (id 0), which by
+        definition is usually the largest-area label in a warped slice.
+        Mirrors the pattern already used for the full overlay build
+        (show_image_with_overlay()'s searchsorted/gather comment) and for
+        _restore_region_highlight()'s undo path, which already avoided
+        this exact anti-pattern.
+        """
         if (
             not self._overlay_ready
             or not hasattr(self, "anno_pixmap")
@@ -3400,19 +5436,37 @@ class AnnotationViewer(QMainWindow):
         ):
             return
 
-        # make a copy of the annotation pixmap
+        mask = self.current_label == self.selected_region_id
+        ys, xs = np.where(mask)
+        if not len(xs):
+            return
+
         anno_pixmap = self._anno_pixmap()
         if anno_pixmap is None:
             return
-        painter = QPainter(anno_pixmap)
-        color = QColor(218, 112, 214)
-        painter.setPen(color)
 
-        # Create a mask where the label array matches the current label value
-        mask = self.current_label == self.selected_region_id
-        points = [QPoint(j, i) for i, j in zip(*np.where(mask))]
-        painter.drawPoints(points)
-        painter.end()
+        if (
+            self._anno_rgba is not None
+            and self._anno_rgba.shape[:2] == self.current_label.shape
+        ):
+            left, right = int(xs.min()), int(xs.max()) + 1
+            top, bottom = int(ys.min()), int(ys.max()) + 1
+            patch = self._anno_rgba[top:bottom, left:right].copy()
+            local_mask = mask[top:bottom, left:right]
+            patch[local_mask] = (214, 112, 218, 255)  # QColor(218,112,214) in B,G,R,A
+            painter = QPainter(anno_pixmap)
+            painter.drawImage(left, top, numpy_array_to_qimage(patch))
+            painter.end()
+        else:
+            # Fallback for the rare case _anno_rgba isn't populated/in sync
+            # with current_label yet -- same behavior as before, just no
+            # longer the common path.
+            painter = QPainter(anno_pixmap)
+            color = QColor(218, 112, 214)
+            painter.setPen(color)
+            points = [QPoint(int(j), int(i)) for i, j in zip(ys, xs)]
+            painter.drawPoints(points)
+            painter.end()
 
         self._set_anno_pixmap(anno_pixmap)
         self._set_img_overlay_layer(self._display_overlay_pixmap())
@@ -3449,23 +5503,126 @@ class AnnotationViewer(QMainWindow):
             self._pan_last_pos = None
         self._sync_navigation_cursor()
 
+    def _compare_adjacent_label_at(self, image_point) -> int | None:
+        """Look up the region id under *image_point* (current_label-space
+        coordinates, i.e. what view_to_image_coordinates() already
+        returns) for Compare Adjacent. Shared by the right-click paint-
+        target picker and the hover status bar (2026-09-23 user report:
+        hovering the comparison pane still showed the *current* slice's
+        region info in the status bar, not the adjacent slice's -- this
+        lookup previously lived only inside
+        _select_paint_target_at_view_pos()).
+
+        The black padding margin around a reference image smaller than
+        current_label's own box has no pixel of its own in the adjacent
+        slice's annotation -- it is pure canvas fill, not part of the
+        picture (see _enter_compare_mode()). 2026-09-23, reconsidered
+        same-day follow-up: an earlier revision treated it as Lost in
+        Warp (id 0); reverted, since it isn't a real warped-out area,
+        just "no reference image here" -- it now gets the same "outside"
+        treatment (None, after showing an explanatory status message) as
+        a point off the canvas entirely. _pointer_in_pane_bounds() already
+        screens out both cases for every caller reached through it, so
+        this bounds check is mainly a defensive fallback here.
+        """
+        if not self._is_inside_compare_image(image_point):
+            self.status_bar.showMessage(
+                "Outside the adjacent slice's image (Compare Adjacent)."
+            )
+            return None
+        adjacent_array = self._compare_adjacent_label_array
+        offset_x, offset_y = self._compare_pixmap_offset
+        native_w, native_h = self._compare_pixmap_native_size
+        pic_x = image_point.x() - offset_x
+        pic_y = image_point.y() - offset_y
+        if adjacent_array.shape == (native_h, native_w):
+            return int(adjacent_array[pic_y, pic_x])
+        src_x = int(pic_x * adjacent_array.shape[1] / native_w)
+        src_y = int(pic_y * adjacent_array.shape[0] / native_h)
+        src_x = min(max(src_x, 0), adjacent_array.shape[1] - 1)
+        src_y = min(max(src_y, 0), adjacent_array.shape[0] - 1)
+        return int(adjacent_array[src_y, src_x])
+
     def _select_paint_target_at_view_pos(self, view, point):
         """Select the atlas label at a click that did not become a right-drag."""
         image_point = self.view_to_image_coordinates(view, point)
-        if (
-            self.current_label is None
-            or image_point.x() < 0
-            or image_point.y() < 0
-            or image_point.x() >= self.current_label.shape[1]
-            or image_point.y() >= self.current_label.shape[0]
-            or not self._is_inside_dapi_image(image_point)
+        # 2026-09-23 user report: right-clicking the part of a Compare
+        # Adjacent reference picture that extends past current_label's own
+        # box (the reference slice's native image can be larger, see
+        # _enter_compare_mode()) always fell through to "Outside DAPI
+        # image" here -- this guard checked current_label's bounds
+        # unconditionally, before the Compare Adjacent-aware branch below
+        # ever got a chance to run. Routed through _pointer_in_pane_bounds()
+        # (shared with the hover status bar and painting gates) so this
+        # pane's real bounds are used instead.
+        if self.current_label is None or not self._pointer_in_pane_bounds(
+            view, image_point
         ):
-            self.status_bar.showMessage("Outside DAPI image")
+            self.status_bar.showMessage(
+                "Outside the adjacent slice's image (Compare Adjacent)."
+                if self._compare_mode_active and view is self.anno_view
+                else "Outside DAPI image"
+            )
             return
-        label_value = int(self.current_label[image_point.y(), image_point.x()])
+        # Compare Adjacent (2026-09-22 user request): a right-click on the
+        # comparison pane picks from *that* adjacent slice's own
+        # annotation, not the current slice's -- the pane is displaying
+        # the adjacent slice's composite, so reading self.current_label
+        # there would silently target the wrong slice's region id whenever
+        # the two slices' labels differ at that pixel.
+        adjacent_array = getattr(self, "_compare_adjacent_label_array", None)
+        if (
+            self._compare_mode_active
+            and view is self.anno_view
+            and adjacent_array is not None
+        ):
+            # The comparison picture is no longer scaled to fill
+            # self.current_label's box (2026-09-23: native-size + padded/
+            # centered canvas, see _enter_compare_mode()) -- this used to
+            # assume a uniform fill and remap the click by a width/height
+            # ratio, which silently picked the *wrong* pixel of
+            # adjacent_array (sometimes one that happened to still be a
+            # valid-looking id) once the picture was placed with an
+            # offset instead of stretched to the canvas edges (2026-09-23
+            # user report: a right-click on visibly empty padding still
+            # "worked"). Undo the same offset _enter_compare_mode() used
+            # to place the picture, then only remap into
+            # adjacent_array's own coordinates if its resolution actually
+            # differs from the picture's (annotation pickle vs. DAPI
+            # preview can legitimately be sized differently -- see the
+            # overlay-resize a few lines up in _enter_compare_mode()).
+            label_value = self._compare_adjacent_label_at(image_point)
+            if label_value is None:
+                return
+            region_name = self.structure_map.get(label_value, {}).get(
+                "name", "Unknown region"
+            )
+            slice_id = self._compare_adjacent_slice_id or "adjacent slice"
+            self.set_paint_region(label_value)
+            self._sync_area_combo_to_region(label_value)
+            self.repaint_selected_only()
+            # Refresh the comparison picture's own selection highlight to
+            # match (2026-09-23 user request) -- repaint_selected_only()
+            # only repaints the current slice's Annotation pane item,
+            # which this compare item sits on top of and hides.
+            self._refresh_compare_if_active()
+            self.status_bar.showMessage(
+                f"Paint target set from {slice_id} (Compare Adjacent): "
+                f"{region_name}"
+            )
+            return
+        else:
+            label_value = int(self.current_label[image_point.y(), image_point.x()])
         self.set_paint_region(label_value)
         self._sync_area_combo_to_region(label_value)
         self.repaint_selected_only()
+        # A paint target picked from the DAPI pane (not the comparison
+        # pane) should still update the comparison highlight if Compare
+        # Adjacent happens to be on at the same time -- painting there
+        # stays available while comparing (see the MouseButtonPress guard
+        # in eventFilter()), and the highlight should track whichever
+        # pane the selection actually came from.
+        self._refresh_compare_if_active()
 
     def eventFilter(self, source, event):
         if (
@@ -3479,6 +5636,32 @@ class AnnotationViewer(QMainWindow):
             width = self.paint_dock.width()
             self._saved_options_dock_width = width
             self._options_settings.setValue("adjustment/optionsDockWidth", width)
+        if source in (self.paint_dock, self) and event.type() == QEvent.Type.Resize:
+            # 2026-09-23 user report: on the very first slice, zooming in
+            # right after the viewer opens (before show_maximized_with_
+            # default_options_width()'s deferred 0ms/200ms resizeDocks()
+            # calls have actually settled the Options dock's final width --
+            # see that method's own comment on why a second, later call is
+            # needed on Windows) left the pan margins/scene rects locked to
+            # the *pre*-settle viewport width. When that deferred resize
+            # then landed (often coinciding with whatever the user did
+            # next, e.g. pressing Next), the DAPI/Annotation panes'
+            # scrollbar ranges changed size underneath the still-stale
+            # cached margins -- and show_image_with_overlay()'s scrollbar-
+            # value preserve/restore (see its own docstring) then re-applied
+            # an old scrollbar *value* that no longer corresponded to the
+            # same on-screen position under the new range, pushing the
+            # image toward one edge instead of keeping it centred. Only an
+            # image_splitter divider drag was wired to
+            # _refresh_virtual_pan_scene_rects() (via splitterMoved); a dock
+            # resize (this deferred settle, a user dragging the dock
+            # divider, or the main window itself being resized/un-
+            # maximized) never re-ran it at all. Routing both the Options
+            # dock's and the main window's own Resize events through the
+            # same debounced timer the splitter drag already uses closes
+            # that gap generally, instead of special-casing the Next-button
+            # timing that happened to be how the user first noticed it.
+            self._splitter_refresh_timer.start(30)
         if isinstance(source, QLineEdit) and event.type() in (
             QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.ShortcutOverride
         ) and event.key() == Qt.Key.Key_Space:
@@ -3488,6 +5671,35 @@ class AnnotationViewer(QMainWindow):
                 replacement = QKeyEvent(event.type(), Qt.Key.Key_Return, event.modifiers(), '\r')
                 QApplication.sendEvent(source, replacement)
             return True
+        # Region picker: clicking into the Search box or the editable Area
+        # combo selects all of its text, like clicking a browser address
+        # bar (2026-09-21 user request; fixed 2026-09-22 after user report
+        # it wasn't firing). Qt grants focus as part of its own click
+        # handling *before* the MouseButtonPress event reaches this
+        # filter, so by the time the press arrives here hasFocus() is
+        # already True even on the very click that brought focus in -- the
+        # original `not source.hasFocus()` guard was therefore always
+        # False and silently skipped every click. Tracking FocusIn/FocusOut
+        # explicitly instead correctly distinguishes "this click brought
+        # focus in" from "this click is on an already-focused field" (the
+        # latter still just places the cursor normally, so a specific
+        # character can still be edited). QTimer.singleShot(0, ...) still
+        # defers the selection past this event's own default
+        # click-to-position-cursor handling, which would otherwise
+        # immediately collapse it back to a single point.
+        if source in (self.area_search_box, self.area_combo.lineEdit()):
+            if event.type() == QEvent.Type.FocusIn:
+                self._region_picker_pending_select_all.add(source)
+            elif event.type() == QEvent.Type.FocusOut:
+                self._region_picker_pending_select_all.discard(source)
+        if (
+            source in (self.area_search_box, self.area_combo.lineEdit())
+            and event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+            and source in self._region_picker_pending_select_all
+        ):
+            self._region_picker_pending_select_all.discard(source)
+            QTimer.singleShot(0, source.selectAll)
         if source is self and event.type() == QEvent.Type.WindowDeactivate:
             self._is_panning = False
             self._pan_last_pos = None
@@ -3525,7 +5737,15 @@ class AnnotationViewer(QMainWindow):
             if self._view_shortcuts_allowed():
                 delta = event.angleDelta().y()
                 if delta != 0:
-                    self._nudge_zoom(10 if delta > 0 else -10)
+                    # Ctrl+scroll resizes the brush instead of zooming
+                    # (2026-09-21 user request). Same per-notch magnitude
+                    # as the '-'/'=' brush-size shortcuts (_nudge_brush's
+                    # existing callers), mirroring how plain scroll's
+                    # per-notch zoom step (10) already matches '['/']'.
+                    if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                        self._nudge_brush(1 if delta > 0 else -1)
+                    else:
+                        self._nudge_zoom(10 if delta > 0 else -10)
                     return True
             return True
 
@@ -3549,11 +5769,28 @@ class AnnotationViewer(QMainWindow):
                 and self.selected_region_id is not None
                 and not getattr(self, "_space_down", False)
             ):
+                if (
+                    self._compare_mode_active
+                    and source is self.anno_view.viewport()
+                ):
+                    # The comparison pane is showing an adjacent
+                    # slice's image, not the current annotation --
+                    # painting there would silently land on the
+                    # current slice's label array under the wrong
+                    # picture. Edit via the DAPI pane instead (2026-09-22
+                    # user request: current-slice editing stays
+                    # available while comparing).
+                    self.status_bar.showMessage(
+                        "Comparison pane is read-only -- edit the "
+                        "current slice from the DAPI pane instead."
+                    )
+                    return True
                 point = event.pos()
+                press_view = source.parent()
                 image_point = self.view_to_image_coordinates(
-                    source.parent(), point
+                    press_view, point
                 )
-                if not self._is_inside_dapi_image(image_point):
+                if not self._pointer_in_pane_bounds(press_view, image_point):
                     self.is_drawing = False
                     self.last_draw_point = None
                     self._hide_brush_cursor()
@@ -3592,7 +5829,7 @@ class AnnotationViewer(QMainWindow):
                 return True
             if self.is_drawing:
                 image_point = self.view_to_image_coordinates(view, point)
-                if not self._is_inside_dapi_image(image_point):
+                if not self._pointer_in_pane_bounds(view, image_point):
                     # Do not connect an in-image capsule through the margin
                     # if the pointer later returns to the DAPI pixmap.
                     self.last_draw_point = None
@@ -3613,11 +5850,19 @@ class AnnotationViewer(QMainWindow):
                 self._update_brush_cursor(view, image_point)
                 return True
             image_point = self.view_to_image_coordinates(view, point)
-            if not self._is_inside_dapi_image(image_point):
+            if not self._pointer_in_pane_bounds(view, image_point):
+                # 2026-09-23 user report: hovering the part of a Compare
+                # Adjacent reference picture past current_label's own box
+                # showed "Outside DAPI image" instead of the reference
+                # slice's info -- see _pointer_in_pane_bounds().
                 self._hide_brush_cursor()
-                self.status_bar.showMessage("Outside DAPI image")
+                self.status_bar.showMessage(
+                    "Outside the adjacent slice's image (Compare Adjacent)."
+                    if self._compare_mode_active and view is self.anno_view
+                    else "Outside DAPI image"
+                )
                 return True
-            self.update_status_bar_with_region(image_point)
+            self.update_status_bar_with_region(image_point, view)
             self._update_brush_cursor(view, image_point)
             return True
 

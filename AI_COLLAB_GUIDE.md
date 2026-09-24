@@ -38,7 +38,7 @@
 
 ## 2. 프로젝트 개요
 
-masonjar = 마우스 뇌 이미지(brain image) 분석용 Electron(+Python) 데스크톱 앱, v7.0.2-MC.1. electron-forge 기반. 개선 축: BaSiCPy shading correction, **seam correction**(tile 경계 보정), Adjustment viewer(`py/adjust.py`), CZI import(`py/czi_extract.py`).
+PFA Jar = 마우스 뇌 이미지(brain image) 분석용 Electron(+Python) 데스크톱 앱, v1.0.0. electron-forge 기반. 개선 축: BaSiCPy shading correction, **seam correction**(tile 경계 보정), Adjustment viewer(`py/adjust.py`), CZI import(`py/czi_extract.py`).
 
 ---
 
@@ -185,7 +185,7 @@ Add-Content .gitignore "`n# dev venv / large static`n.venv/`n*.nrrd"
 git init
 git add -A
 git status        # node_modules/out/.venv/logs 등 대용량이 목록에 없어야 함
-git commit -m "[baseline] 7.0.2-MC.1-improving 소스 (기존 개선 포함)"
+git commit -m "PFA Jar 1.0.0"
 ```
 
 - 이 소스에는 `.gitmodules`(submodule)가 있다. `git status`에 submodule 경고가 뜨면 알려줄 것 — 로컬 추적 목적이면 해당 경로를 일반 파일로 추가하거나 별도 처리.

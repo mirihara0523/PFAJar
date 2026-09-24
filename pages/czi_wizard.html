@@ -14,7 +14,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net/; font-src 'self' https://fonts.gstatic.com; img-src 'self' file: data:;"
     />
-    <title>CZI import — Mason Jar</title>
+    <title>CZI import — PFA Jar</title>
     <style>
       .czi-orient-grid {
         display: grid;
@@ -103,7 +103,7 @@
           <input type="text" class="form-control" id="projectName" placeholder="M528" />
         </div>
         <div class="mb-3">
-          <label class="form-label" for="parentDir">Location to store all Mason Jar Projects</label>
+          <label class="form-label" for="parentDir">Location to store all PFA Jar Projects</label>
           <div class="input-group">
             <input type="text" class="form-control" id="parentDir" readonly />
             <button type="button" class="btn btn-outline-primary" id="chooseParent">
@@ -431,6 +431,10 @@
           Detailed lines also appear in the application log window.
         </p>
         <pre id="extractLog" class="wizard-log czi-extract-log small text-muted mb-3"></pre>
+        <p id="extractBackgroundNote" class="small text-muted mb-2">
+          Import continues in background. You can leave this screen (or work on another
+          project) and come back later to check progress — leaving does not stop the import.
+        </p>
         <div class="mt-3 d-flex flex-wrap gap-2">
           <button type="button" class="btn btn-outline-danger d-none" id="cancelExtract">
             Cancel extraction
@@ -438,6 +442,9 @@
           <button type="button" class="btn btn-primary d-none" id="step4Continue">
             Continue to Orient
           </button>
+          <a class="btn btn-outline-secondary" id="step4BackToMenu" href="./menu.html">
+            Back to Main Menu
+          </a>
         </div>
       </section>
 

@@ -48,7 +48,7 @@ import {
   refreshUpdateLockState,
   releaseUpdateLock,
   isMandatoryUpdateRequired,
-  countOtherMasonJarInstances,
+  countOtherPFAJarInstances,
   resolveInstallRoot,
   isActiveUpdateLock,
   listInstallVersionBackups,
@@ -203,7 +203,7 @@ function _ensureLogStream() {
         var file = path.join(dir, "masonjar-" + stamp + ".log");
         _logStream = fs.createWriteStream(file, { flags: "a" });
         _logStream!.write(
-            "==== Mason Jar session start " +
+            "==== PFA Jar session start " +
                 now.toLocaleString() +
                 " (pid " +
                 process.pid +
@@ -249,11 +249,11 @@ app.on("before-quit", () => {
 });
 
 const BRANDING = {
-  PRODUCT_NAME: "Mason Jar",
+  PRODUCT_NAME: "PFA Jar",
   HOME_DIR: ".masonjar",
   LEGACY_HOME_DIR: ".belljar",
   LOG_FILE: "masonjar.log",
-  GITHUB_REPO: "mirihara0523-hue/masonjar",
+  GITHUB_REPO: "mirihara0523/PFAJar",
 };
 
 const LEGACY_HOME_COPY_ENTRIES = [
@@ -311,7 +311,7 @@ async function maybeMigrateLegacyHome(
   const choice = dialog.showMessageBoxSync(win, {
     type: "question",
     message:
-      "Mason Jar uses ~/.masonjar (separate from Bell Jar's ~/.belljar).",
+      "PFA Jar uses ~/.masonjar (separate from Bell Jar's ~/.belljar).",
     detail:
       "Copy your existing Bell Jar environment to save re-downloading ~20GB, or install fresh into ~/.masonjar.",
     buttons: ["Copy from Bell Jar", "Fresh install", "Cancel"],
@@ -460,7 +460,7 @@ function guardPipelineRun(event: any): boolean {
   }
   try {
     queueLogLineForUi(
-      "Required update in progress — pipeline tools are disabled until Mason Jar restarts.",
+      "Required update in progress — pipeline tools are disabled until PFA Jar restarts.",
     );
     event.sender.send("updateLoad", [0, "Required update — pipeline blocked"]);
   } catch (_e) {
@@ -485,7 +485,7 @@ async function enforceMandatoryStableUpdate(
       return false;
     }
     const installRoot = resolveInstallRoot(app.isPackaged);
-    const others = countOtherMasonJarInstances(installRoot);
+    const others = countOtherPFAJarInstances(installRoot);
     if (others > 0) {
       dialog.showMessageBoxSync(parentWin, {
         type: "warning",
@@ -534,7 +534,7 @@ async function checkForUpdates(
       const userResponse = await dialog.showMessageBox(parentWin || undefined, {
         type: "info",
         title: "Update Available",
-        message: "A new version of Mason Jar is available.",
+        message: "A new version of PFA Jar is available.",
         detail: detailParts.join("\n\n"),
         buttons: ["Update", "Download in browser", "Later"],
         defaultId: 0,
@@ -554,7 +554,7 @@ async function checkForUpdates(
         type: "info",
         title: "No updates",
         message: "You're up to date.",
-        detail: `Mason Jar ${CURRENT_VERSION_TAG} is the latest version available for your update settings.`,
+        detail: `PFA Jar ${CURRENT_VERSION_TAG} is the latest version available for your update settings.`,
         buttons: ["OK"],
       });
     } else {
@@ -1131,7 +1131,7 @@ function createWindow() {
   return win;
 }
 
-let mainWindowBaseTitle = "Mason Jar";
+let mainWindowBaseTitle = "PFA Jar";
 let ioFairshareTitleTimer: NodeJS.Timeout | null = null;
 
 function refreshMainWindowFairshareTitle(
@@ -1155,11 +1155,11 @@ function refreshMainWindowFairshareTitle(
 }
 
 function attachFairshareTitleBar(targetWin: typeof BrowserWindow): void {
-  mainWindowBaseTitle = targetWin.getTitle() || "Mason Jar";
+  mainWindowBaseTitle = targetWin.getTitle() || "PFA Jar";
   targetWin.webContents.on(
     "page-title-updated",
     (_event: unknown, title: string) => {
-      mainWindowBaseTitle = title || "Mason Jar";
+      mainWindowBaseTitle = title || "PFA Jar";
       refreshMainWindowFairshareTitle(targetWin);
     },
   );
@@ -1234,7 +1234,7 @@ function ensureLogWindowVisible(opts?: { force?: boolean }): boolean {
   }
   if (!logWin.isVisible()) {
     // Show without activating so the log window does not steal focus or
-    // remain visually forced above the main Mason Jar window.
+    // remain visually forced above the main PFA Jar window.
     if (typeof (logWin as any).showInactive === "function") {
       (logWin as any).showInactive();
     } else {
@@ -1609,7 +1609,7 @@ ipcMain.handle("openUpdateLog", async () => {
   return {
     ok: true,
     opened: "folder",
-    message: "No update log yet — opened Mason Jar settings folder.",
+    message: "No update log yet — opened PFA Jar settings folder.",
   };
 });
 
@@ -1681,7 +1681,7 @@ function dialogParentWindow(event: { sender: any }): typeof BrowserWindow | null
   return focused && !focused.isDestroyed() ? focused : null;
 }
 
-/** Minimize Mason Jar when an external tool (e.g. Napari) takes over the desktop. */
+/** Minimize PFA Jar when an external tool (e.g. Napari) takes over the desktop. */
 function handoffParentForExternalTool(parent: typeof BrowserWindow | null): void {
   try {
     if (parent && !parent.isDestroyed()) {
@@ -1692,7 +1692,7 @@ function handoffParentForExternalTool(parent: typeof BrowserWindow | null): void
   }
 }
 
-/** Restore Mason Jar after an external tool session ends. */
+/** Restore PFA Jar after an external tool session ends. */
 function restoreParentAfterExternalTool(parent: typeof BrowserWindow | null): void {
   try {
     if (parent && !parent.isDestroyed()) {
@@ -1733,7 +1733,7 @@ function directoryDialogOptions(
   } else if (tag === "newProjectBundle") {
     options.title = `New ${BRANDING.PRODUCT_NAME} project location`;
     options.message =
-      "Choose a parent folder. Mason Jar will create Name_masonjar/ with Name.masonjar and data/ inside.";
+      "Choose a parent folder. PFA Jar will create Name_masonjar/ with Name.masonjar and data/ inside.";
   } else if (tag === "brainRoot") {
     options.title = "Legacy brain folder";
     options.message =
@@ -1741,7 +1741,7 @@ function directoryDialogOptions(
   } else if (tag === "nasLocations") {
     options.title = "Select network drives or NAS folders";
     options.message =
-      "Choose mapped drives (e.g. Z:\\) or UNC shares. Mason Jar stores the drive or share root for bandwidth fair-share.";
+      "Choose mapped drives (e.g. Z:\\) or UNC shares. PFA Jar stores the drive or share root for bandwidth fair-share.";
   }
   return options;
 }

@@ -9,7 +9,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from apply_geometry import apply_ops_to_array, compose_ops_from_spec, ops_from_string_list
+from geometry_ops import apply_ops_to_array, compose_ops_from_spec, ops_from_string_list
 from czi_common import resolve_original_zstack_path
 
 MAX_EDGE = 256

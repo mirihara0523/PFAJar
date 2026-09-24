@@ -26,7 +26,7 @@ PY_DIR = Path(__file__).resolve().parents[2] / "py"
 sys.path.insert(0, str(PY_DIR))
 
 def _benv_python() -> Path:
-    """Resolve the Mason Jar venv interpreter on either layout.
+    """Resolve the PFA Jar venv interpreter on either layout.
 
     POSIX venvs put the interpreter in ``benv/bin/python``; Windows venvs use
     ``benv/Scripts/python.exe``. Hardcoding the POSIX path made these Tier 1

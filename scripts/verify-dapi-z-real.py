@@ -1,7 +1,7 @@
 """Real-CZI, crash-safe verification for the DAPI Z candidate resolver.
 
 Ad-hoc, read-only diagnostic — never writes to the project bundle or CZI
-source. Run with Mason Jar's runtime Python (the same interpreter the shared
+source. Run with PFA Jar's runtime Python (the same interpreter the shared
 worker uses, typically ``C:\\Users\\<you>\\.masonjar\\python\\python.exe``)
 so the installed aicspylibczi/numpy/opencv/tifffile match production, and so
 any disposable probe child this spawns (via ``sys.executable``) behaves

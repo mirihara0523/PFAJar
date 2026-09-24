@@ -152,3 +152,11 @@ scripts/sharpen-phase1-trace.py
 scripts/compare-*.py
 scripts/reextract-czi-slice.py
 scripts/out/
+# --- Local diagnostic and generated artifacts ---
+legacy_atlas.nrrd
+.preview-order-smoke.tif
+.preview-order-smoke*/
+.test-seam-fixture.tif
+*.bak_*
+.pytest_cache/
+*.pyc

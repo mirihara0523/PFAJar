@@ -2,7 +2,7 @@
 "use strict";
 
 /**
- * Publish Mason Jar release assets to GitHub.
+ * Publish PFA Jar release assets to GitHub.
  *
  * Default: upload Windows x64 zip only (primary user platform; faster publish).
  *
@@ -20,7 +20,7 @@ const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const REPO_ROOT = path.join(__dirname, "..");
-const REPO = "matsojr22/masonjar";
+const REPO = "mirihara0523/PFAJar";
 const OUT_MAKE = path.join(REPO_ROOT, "out", "make");
 const releaseNotes = require("./release_notes");
 
@@ -44,7 +44,7 @@ function parseArgs(argv) {
 		} else if (a === "--prerelease") {
 			opts.prerelease = true;
 		} else if (a === "--help" || a === "-h") {
-			console.log(`Publish Mason Jar GitHub release assets
+			console.log(`Publish PFA Jar GitHub release assets
 
   node scripts/publish-release.js                 Windows zip only (default)
   node scripts/publish-release.js --all-platforms  Upload every masonjar-* artifact for version
@@ -223,7 +223,7 @@ function buildGithubReleaseBody(version, opts) {
 	opts = opts || {};
 	const allPlatforms = !!opts.allPlatforms;
 	const notes = releaseNotes.requireReleaseNotes(version);
-	const lines = ["## Mason Jar v" + version, ""];
+	const lines = ["## PFA Jar v" + version, ""];
 
 	lines.push("### What's new", "", notes.whatsNew, "");
 
@@ -264,7 +264,7 @@ function buildGithubReleaseBody(version, opts) {
 	lines.push(
 		"### Upgrading",
 		"",
-		"Install over your previous Mason Jar folder or unzip to a new path. User data and models stay under `~/.masonjar` (Windows: `%USERPROFILE%\\.masonjar`).",
+		"Install over your previous PFA Jar folder or unzip to a new path. User data and models stay under `~/.masonjar` (Windows: `%USERPROFILE%\\.masonjar`).",
 		"",
 	);
 
@@ -349,7 +349,7 @@ async function main() {
 	if (!release || !release.id) {
 		release = await githubRequest("POST", base + "/releases", token, {
 			tag_name: tag,
-			name: "Mason Jar v" + version,
+			name: "PFA Jar v" + version,
 			body: notesBody,
 			draft: false,
 			prerelease: opts.prerelease,
@@ -361,7 +361,7 @@ async function main() {
 		);
 	} else {
 		await githubRequest("PATCH", base + "/releases/" + release.id, token, {
-			name: "Mason Jar v" + version,
+			name: "PFA Jar v" + version,
 			body: notesBody,
 			prerelease: opts.prerelease,
 		});

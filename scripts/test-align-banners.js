@@ -81,7 +81,7 @@ assert(
 assert(
 	html.indexOf("Finish</strong> in Napari") >= 0 ||
 		html.indexOf("warping progress") >= 0,
-	"Napari banner should mention Finish returns Mason Jar for warping",
+	"Napari banner should mention Finish returns PFA Jar for warping",
 );
 
 console.log("test-align-banners.js: OK");

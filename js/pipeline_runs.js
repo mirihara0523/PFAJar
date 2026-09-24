@@ -1309,7 +1309,7 @@ function migrateOrphanMaxFamilyLeaves(bundleRoot, roles, processing, settings) {
 		var skipMsg =
 			"[pipeline_runs] Skipping orphan max-family migrate (" +
 			pick.reason +
-			"); re-run sharpen/tophat after updating Mason Jar, or set a single signal branch.";
+			"); re-run sharpen/tophat after updating PFA Jar, or set a single signal branch.";
 		console.warn(skipMsg);
 		return {
 			changed: false,

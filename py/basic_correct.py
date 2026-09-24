@@ -1,4 +1,4 @@
-"""BaSiCPy shading correction for Mason Jar (per-channel fit + apply)."""
+"""BaSiCPy shading correction for PFA Jar (per-channel fit + apply)."""
 
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ def _make_basic(params: dict[str, Any]):
         from basicpy import BaSiC
     except ImportError as exc:
         raise ImportError(
-            "basicpy is not installed in the Mason Jar venv. "
+            "basicpy is not installed in the PFA Jar venv. "
             "Update Python dependencies from Settings or reinstall."
         ) from exc
     kwargs: dict[str, Any] = {

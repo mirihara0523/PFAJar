@@ -63,7 +63,7 @@ function main() {
 	var python = resolveEnvPython();
 	if (!python || !fs.existsSync(python)) {
 		console.log(
-			"test-dapi-cleanup.js: SKIP (no ~/.masonjar/benv — run Mason Jar once to bootstrap)",
+			"test-dapi-cleanup.js: SKIP (no ~/.masonjar/benv — run PFA Jar once to bootstrap)",
 		);
 		return;
 	}

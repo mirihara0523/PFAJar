@@ -1,4 +1,4 @@
-# Mason Jar — Current Coordination Status
+# PFA Jar — Current Coordination Status
 
 Updated: 2026-09-13
 
@@ -7,8 +7,8 @@ Updated: 2026-09-13
 - Source: `D:\Claude\masonjar-7.0.2-MC.1-improving`
 - Test runtime: `D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64`
 - Coordination records: `D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination`
-- Original reference source: `D:\Claude\masonjar-7.0.2`
-- Original reference runtime: `D:\Claude\masonjar-win32-x64`
+- Original reference source: `D:\Claude\archive\MasonJar-7.0.2-reference\masonjar-7.0.2`
+- Original reference runtime: `D:\Claude\archive\MasonJar-7.0.2-reference\masonjar-win32-x64`
 
 ## Current state
 

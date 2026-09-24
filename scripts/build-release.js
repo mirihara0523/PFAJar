@@ -2,7 +2,7 @@
 "use strict";
 
 /**
- * Canonical Mason Jar release build (GitHub artifacts).
+ * Canonical PFA Jar release build (GitHub artifacts).
  *
  * Agents and humans MUST use this script for releases — do not run a single
  * `electron-forge make --arch=arm64` on the host machine and treat that as a
@@ -138,7 +138,7 @@ function parseArgs(argv) {
 		} else if (a === "--windows-only") {
 			opts.windowsOnly = true;
 		} else if (a === "--help" || a === "-h") {
-			console.log(`Mason Jar release build
+			console.log(`PFA Jar release build
 
   node scripts/build-release.js              macOS Intel + ARM + Windows (default)
   node scripts/build-release.js --windows-only   Windows x64 zip only
@@ -257,7 +257,7 @@ function isWindowsReleaseZip(zipPath) {
 	const rel = path.relative(OUT_MAKE, zipPath).split(path.sep).join("/");
 	return (
 		/^zip\/win32\/x64\/.*\.zip$/i.test(rel) &&
-		!\.wrap-tmp\.zip$/i.test(rel)
+		!/\.wrap-tmp\.zip$/i.test(rel)
 	);
 }
 
@@ -389,7 +389,7 @@ function wrapWindowsReleaseZips(artifacts, version) {
 
 function writeManifest(version, targets, artifacts) {
 	const lines = [
-		"# Mason Jar release artifacts",
+		"# PFA Jar release artifacts",
 		"",
 		"Version: " + version,
 		"Built: " + new Date().toISOString(),
@@ -462,7 +462,7 @@ function main() {
 	const version = readVersion();
 	const targets = opts.local ? hostTarget() : releaseTargets(opts);
 
-	console.log("Mason Jar release build v" + version);
+	console.log("PFA Jar release build v" + version);
 	if (opts.local) {
 		console.warn(
 			"\n*** --local: building for this machine only. NOT sufficient for GitHub release. ***\n",

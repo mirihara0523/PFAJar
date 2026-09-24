@@ -85,10 +85,10 @@ export function defaultCoordinatorDir(): string {
   if (process.platform === "win32") {
     const programData =
       process.env.ProgramData || path.join("C:", "ProgramData");
-    return path.join(programData, "MasonJar", "io-fairshare");
+    return path.join(programData, "PFAJar", "io-fairshare");
   }
   if (process.platform === "darwin") {
-    return "/Library/Application Support/MasonJar/io-fairshare";
+    return "/Library/Application Support/PFAJar/io-fairshare";
   }
   return path.join("/var", "run", "masonjar-io-fairshare");
 }

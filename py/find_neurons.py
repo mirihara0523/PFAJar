@@ -82,7 +82,7 @@ def _limit_detect_threads():
 
 
 def make_tile_progress_printer(label):
-    """Emit stdout lines so Mason Jar's progress bar updates during SAHI tiling."""
+    """Emit stdout lines so PFA Jar's progress bar updates during SAHI tiling."""
     state = {"last": 0}
 
     def progress_callback(current, total):
@@ -319,7 +319,7 @@ if __name__ == "__main__":
     with open(output_dir / "run_manifest.json", "w", encoding="utf-8") as mf:
         json.dump(manifest, mf, indent=2)
 
-    # Slice count for the Mason Jar progress bar (one step per image).
+    # Slice count for the PFA Jar progress bar (one step per image).
     print(len(files), flush=True)
     print(f"Using device: {device}", flush=True)
     print(f"Using model: {model_path}", flush=True)
