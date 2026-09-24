@@ -7,6 +7,16 @@ module.exports = {
 		ignore: [
 			/^\/\.venv(?:\/|$)/,
 			/^\/\.test-seam-fixture\.tif$/,
+			/^\/\.preview-order-smoke(?:[-.]|$)/,
+			/^\/\.ruff_cache(?:\/|$)/,
+			/^\/(?:AI_COLLAB_GUIDE|DEVELOPER_HANDOFF|STATUS)\.md$/,
+			// Keep the in-app PDF help, but leave development and release
+			// documentation in the source repository and coordination folder.
+			/^\/docs\/(?!belljar_guide\.pdf$)/,
+			// Test and measurement utilities are source-only; production code does
+			// not launch files from scripts/.
+			/^\/scripts\/(?:test-|smoke-pages\.js$|measure-)/,
+			/^\/py\/(?:test_|align_seam_ab_test\.py$|__pycache__(?:\/|$))/,
 			"src",
 			"tsconfig.json",
 			"yarn.lock",
