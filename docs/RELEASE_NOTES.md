@@ -6,6 +6,25 @@ Do not put file paths, test names, or IPC implementation details here—keep rel
 
 ---
 
+## v1.0.1
+
+**What's new**
+
+- **Safer Grid-estimated Seam Correction:** Horizontal correction now runs only when repeated, consistent seam evidence is present. Weak or anatomy-derived horizontal candidates are skipped, avoiding corrections where no reliable seam exists.
+- **Better continuity at sparse tiles:** Small tissue fragments and cropped edge tiles use conservative correction, reducing visible rectangular discontinuities while retaining supported seam corrections.
+- **Cleaner Compare Adjacent view:** Turning off the annotation overlay now also hides the selected-region highlight in the adjacent slice.
+- **Smaller release package:** Development-only tests, scripts, documentation, backups, and unused icon sources are excluded from the Windows package.
+
+**Commit subject**
+
+PFA Jar 1.0.1: improve grid-estimated seam safety
+
+**Commit body**
+
+Strengthen image-only Grid-estimated seam confidence checks, protect sparse and incomplete tiles, and clean up adjacent-view overlay behavior.
+
+---
+
 ## v1.0.0
 
 **What's new**

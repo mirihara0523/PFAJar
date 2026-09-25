@@ -2,7 +2,7 @@
   "name": "pfajar",
   "productName": "PFA Jar",
   "description": "A tool for mouse neurohistology",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "main.js",
   "repository": "mirihara0523/PFAJar",
   "author": "matsojr22",
