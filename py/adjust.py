@@ -4355,9 +4355,20 @@ class AnnotationViewer(QMainWindow):
                         interpolation=cv2.INTER_NEAREST,
                     ).astype(bool)
                 composite = composite.copy()
-                # (214, 112, 218) BGR == QColor(218, 112, 214) RGB, the
-                # same highlight color repaint_selected_only() paints with.
-                composite[sel_mask] = (214, 112, 218)
+                # The main DAPI pane draws this purple selection into the
+                # annotation layer, then applies the global overlay opacity
+                # to that whole layer.  Compare Adjacent has already
+                # flattened its overlay into an RGB image, so replacing the
+                # selected pixels outright here would make the highlight
+                # opaque.  Blend it with the raw DAPI using the same global
+                # opacity instead.
+                highlight_alpha = self.opacity / 255.0
+                dapi_rgb = cv2.cvtColor(adjusted, cv2.COLOR_GRAY2RGB)
+                highlight_rgb = np.array((218, 112, 214), dtype=np.float32)
+                composite[sel_mask] = (
+                    dapi_rgb[sel_mask].astype(np.float32) * (1.0 - highlight_alpha)
+                    + highlight_rgb * highlight_alpha
+                ).astype(np.uint8)
 
         pixmap = QPixmap.fromImage(numpy_array_to_qimage(composite))
         if self.current_label is not None:

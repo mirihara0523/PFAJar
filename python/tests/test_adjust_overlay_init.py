@@ -85,6 +85,17 @@ def test_compare_adjacent_selection_highlight_requires_overlay():
     assert "and self.selected_region_id is not None" in highlight_block
 
 
+def test_compare_adjacent_selection_highlight_respects_opacity():
+    """Adjacent selection highlight must use the DAPI overlay opacity."""
+    src = (_PY_DIR / "adjust.py").read_text(encoding="utf-8")
+    start = src.index("# The main DAPI pane draws this purple selection")
+    end = src.index("\n\n        pixmap = QPixmap.fromImage", start)
+    highlight_block = src[start:end]
+    assert "highlight_alpha = self.opacity / 255.0" in highlight_block
+    assert "dapi_rgb[sel_mask]" in highlight_block
+    assert "highlight_rgb * highlight_alpha" in highlight_block
+
+
 def test_init_paint_region_controls_after_paint_swatch():
     """Paint-target widgets must exist before hierarchy/area combo population."""
     src = (_PY_DIR / "adjust.py").read_text(encoding="utf-8")
