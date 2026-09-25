@@ -4329,14 +4329,21 @@ class AnnotationViewer(QMainWindow):
                 composite = adjusted
 
         # Highlight the currently selected paint target within the
-        # adjacent slice's own annotation (2026-09-23 user request):
+        # adjacent slice's own annotation only while its annotation
+        # overlay is visible.  The highlight is part of that overlay,
+        # rather than an independent DAPI decoration, so Toggle Overlay
+        # must remove it as well (2026-09-24 user report).
         # mirrors repaint_selected_only()'s highlight for the current
         # slice's DAPI/Annotation pane, but looked up in
         # adjacent_label_array instead of current_label, so a paint
         # target selected while comparing (or one already selected
         # before Compare Adjacent was turned on) shows where it falls on
         # the adjacent tissue too, not just on the current slice.
-        if self.selected_region_id is not None and adjacent_label_array is not None:
+        if (
+            self.overlay_visible
+            and self.selected_region_id is not None
+            and adjacent_label_array is not None
+        ):
             sel_mask = adjacent_label_array == self.selected_region_id
             if sel_mask.any():
                 if composite.ndim == 2:

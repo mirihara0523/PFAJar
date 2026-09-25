@@ -9,13 +9,18 @@ module.exports = {
 			/^\/\.test-seam-fixture\.tif$/,
 			/^\/\.preview-order-smoke(?:[-.]|$)/,
 			/^\/\.ruff_cache(?:\/|$)/,
+			/^\/(?:\.eslintignore|\.eslintrc\.js|\.gitattributes|\.gitignore|forge\.config\.js|requirements\.txt)$/,
 			/^\/(?:AI_COLLAB_GUIDE|DEVELOPER_HANDOFF|STATUS)\.md$/,
+			/^\/legacy_atlas\.nrrd$/,
+			/\.bak(?:[_\.-]|$)/,
 			// Keep the in-app PDF help, but leave development and release
 			// documentation in the source repository and coordination folder.
 			/^\/docs\/(?!belljar_guide\.pdf$)/,
-			// Test and measurement utilities are source-only; production code does
-			// not launch files from scripts/.
-			/^\/scripts\/(?:test-|smoke-pages\.js$|measure-)/,
+			// Build, test, benchmark, and release utilities are source-only; the
+			// running app never launches files from either development tree.
+			/^\/scripts(?:\/|$)/,
+			/^\/python(?:\/|$)/,
+			/^\/patches(?:\/|$)/,
 			/^\/py\/(?:test_|align_seam_ab_test\.py$|__pycache__(?:\/|$))/,
 			"src",
 			"tsconfig.json",

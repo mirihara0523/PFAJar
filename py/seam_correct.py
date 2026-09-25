@@ -262,6 +262,29 @@ def seam_positions(width: int, period: int, ap: np.ndarray) -> np.ndarray:
     return xs[(xs >= 1) & (xs < width - 1)]
 
 
+def _exclude_incomplete_edge_boundaries(length: int, period: int, positions: list[int]) -> list[int]:
+    """Drop a seam adjoining an undersized first/last mosaic fragment.
+
+    A cropped scene can end partway through a tile. Its small tissue fragment
+    is not comparable with the preceding full tile and may produce a large
+    false seam step. Interior boundaries remain unchanged; a terminal
+    interval must be at least 65% of the inferred period to participate.
+    """
+    ordered = sorted(set(int(x) for x in positions if 0 < int(x) < length))
+    if not ordered or not period:
+        return ordered
+    minimum = max(20, int(round(period * 0.65)))
+    edges = [0] + ordered + [length]
+    kept = []
+    for index, point in enumerate(ordered):
+        if edges[index + 1] - edges[index] < minimum:
+            continue
+        if edges[index + 2] - edges[index + 1] < minimum:
+            continue
+        kept.append(point)
+    return kept
+
+
 def estimate_step(img: np.ndarray, tissue: np.ndarray, x: int, band: int = DEFAULT_BAND) -> float:
     """x must already be "first column of the right tile" -- i.e. the value
     returned by seam_positions() shifted by +1 (see module docstring / the
@@ -463,11 +486,21 @@ def _validated_seam_positions(
     return sorted(accepted), steps
 
 
-def correct(img8: np.ndarray, *, band: int = DEFAULT_BAND, tissue_threshold: int = 8) -> tuple[np.ndarray, dict[str, Any]]:
+def correct(
+    img8: np.ndarray,
+    *,
+    band: int = DEFAULT_BAND,
+    tissue_threshold: int = 8,
+    tissue_mask: np.ndarray | None = None,
+    apply_to_background: bool = False,
+) -> tuple[np.ndarray, dict[str, Any]]:
     """Offset-only vertical seam correction. Returns (corrected_uint8, info)."""
     img = img8.astype(np.float32)
     width = img.shape[1]
-    tissue = img8 > tissue_threshold
+    # Grid-estimated two-axis correction measures both axes from the original
+    # tissue mask.  A preceding axis must not promote corrected background
+    # pixels into new "tissue" for the next measurement.
+    tissue = (img8 > tissue_threshold) if tissue_mask is None else tissue_mask.astype(bool, copy=False)
     ap = _column_gradient_profile(img, tissue)
     period, corr_val = _select_vertical_period(img, tissue, ap, width)
     if not period:
@@ -475,6 +508,7 @@ def correct(img8: np.ndarray, *, band: int = DEFAULT_BAND, tissue_threshold: int
 
     periodic_xs = seam_positions(width, period, ap) + 1  # off-by-one fix: k -> first column of right tile
     periodic_xs = periodic_xs[(periodic_xs >= 1) & (periodic_xs < width)].tolist()
+    periodic_xs = _exclude_incomplete_edge_boundaries(width, period, periodic_xs)
     xs_sorted, steps = _validated_seam_positions(img, tissue, ap, width, periodic_xs, band=band)
     # Periodic candidates come from the dominant tile-spacing hypothesis and
     # must not be discarded merely because a weak seam fails the stricter
@@ -519,7 +553,8 @@ def correct(img8: np.ndarray, *, band: int = DEFAULT_BAND, tissue_threshold: int
 
     out = img - offset[None, :]
     out = np.clip(out, 0, 255)
-    out[~tissue] = img8[~tissue]  # leave background untouched
+    if not apply_to_background:
+        out[~tissue] = img8[~tissue]  # retain legacy behavior by default
     out_u8 = out.astype(np.uint8)
     return out_u8, {
         "period": period,
@@ -529,6 +564,232 @@ def correct(img8: np.ndarray, *, band: int = DEFAULT_BAND, tissue_threshold: int
         "n_seams_recovered": len([x for x in xs_sorted if x not in periodic_xs]),
         "seam_positions": [int(x) for x in xs_sorted],
         "steps": [round(v, 1) for v in steps.values()],
+    }
+
+
+# Grid-estimated two-axis correction.  The original image-only estimator was
+# deliberately vertical-only.  Real M458 previews demonstrate a repeatable
+# horizontal grid as well: use its independent period only when >=3 interior
+# boundaries agree, then repair the vertical grid with a conservative,
+# height-aware step profile.  Known-geometry retains its separate path below.
+GRID_VERTICAL_BAND = 4
+GRID_HORIZONTAL_BAND = 6
+GRID_HORIZONTAL_RAMP = 0.50
+# A single dim pixel on each side of a seam is not enough evidence to adapt a
+# row independently.  Four-pixel measurement bands therefore require three
+# paired tissue pixels before contributing to the local profile.
+GRID_LOCAL_MIN_PAIRED_PIXELS = 3
+GRID_LOCAL_MIN_PAIRED_ROWS = 0.08
+GRID_BACKGROUND_FLOOR_MIN = 12
+GRID_BACKGROUND_FLOOR_MAX = 24
+
+
+def _periodic_grid_positions(img8: np.ndarray, *, transpose: bool = False) -> tuple[int | None, list[int]]:
+    work = img8.T if transpose else img8
+    tissue = work > 8
+    ap = _column_gradient_profile(work.astype(np.float32), tissue)
+    period, _corr = _select_vertical_period(work.astype(np.float32), tissue, ap, work.shape[1])
+    if not period:
+        return None, []
+    positions = [int(x + 1) for x in seam_positions(work.shape[1], period, ap)]
+    # Edge fragments are not complete mosaic boundaries.
+    positions = [x for x in positions if 20 < x < work.shape[1] - 20]
+    return period, _exclude_incomplete_edge_boundaries(work.shape[1], period, positions)
+
+
+def _horizontal_ramp(
+    img8: np.ndarray,
+    period: int | None,
+    boundaries: list[int],
+    tissue: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Apply only a repeated within-tile vertical brightness ramp.
+
+    A shared slope is used rather than a per-tile fit so anatomy in one tile
+    cannot dictate its own correction.  Three agreeing interior tiles are the
+    minimum evidence for this image-only mode.
+    """
+    if not period or len(boundaries) < 3:
+        return img8.copy(), 0.0
+    h, w = img8.shape
+    slopes: list[float] = []
+    bounds = [0] + boundaries + [h]
+    for lo, hi in zip(bounds[1:-2], bounds[2:-1]):
+        if abs((hi - lo) - period) > max(4, period * 0.10):
+            continue
+        coords, values = [], []
+        for y in range(lo, hi):
+            pix = img8[y][tissue[y]]
+            if pix.size >= 120:
+                coords.append(y - (lo + hi - 1) / 2)
+                values.append(float(np.median(pix)))
+        if len(coords) >= max(20, int(period * 0.8)):
+            slopes.append(float(np.polyfit(coords, values, 1)[0]))
+    nonzero = [s for s in slopes if abs(s) >= 0.03]
+    same_direction = max(sum(s > 0 for s in nonzero), sum(s < 0 for s in nonzero)) if nonzero else 0
+    if len(slopes) < 3 or same_direction < 3:
+        return img8.copy(), 0.0
+    slope = float(np.median(slopes)) * GRID_HORIZONTAL_RAMP
+    out = img8.astype(np.float32).copy()
+    for lo, hi in zip(bounds[:-1], bounds[1:]):
+        local = np.arange(lo, hi, dtype=np.float32) - (lo + hi - 1) / 2
+        correction = slope * local[:, None]
+        region = out[lo:hi]
+        # Preserve original background.  Dark background values can differ
+        # naturally by tile, and applying a tissue-derived illumination slope
+        # there makes the rectangular grid more conspicuous.
+        mask = tissue[lo:hi]
+        region[mask] -= np.broadcast_to(correction, region.shape)[mask]
+    return np.clip(out, 0, 255).astype(np.uint8), slope
+
+
+def _axis_has_reliable_grid_steps(
+    image: np.ndarray,
+    tissue: np.ndarray,
+    boundaries: list[int],
+    *,
+    band: int,
+) -> bool:
+    """Require repeated, agreeing measured steps before correcting an axis.
+
+    Periodicity alone is not enough when seams are visually absent: anatomy
+    can produce an unrelated autocorrelation period. A valid image-only grid
+    axis needs at least three boundaries with meaningful steps in the same
+    direction. This deliberately makes the correction a no-op for axes such
+    as M551_s046's horizontal dimension.
+    """
+    if len(boundaries) < 3:
+        return False
+    steps = np.asarray(
+        [estimate_step(image.astype(np.float32), tissue, point, band=band) for point in boundaries],
+        dtype=np.float32,
+    )
+    meaningful = steps[np.abs(steps) >= 3.0]
+    if meaningful.size < 3:
+        return False
+    agreeing = max(int((meaningful > 0).sum()), int((meaningful < 0).sum()))
+    return agreeing >= 3
+
+
+def _vertical_local_grid(
+    img8: np.ndarray,
+    boundaries: list[int],
+    tissue: np.ndarray,
+) -> tuple[np.ndarray, list[int], list[int]]:
+    """Height-aware vertical grid correction with global fallback.
+
+    Local profiles are strongly smoothed and only influence seams whose global
+    step is sufficiently supported.  Memory stays bounded by the image plus a
+    small (height x number-of-tiles) profile; no full 2-D offset image is made.
+    """
+    if not boundaries:
+        return img8.copy(), [], []
+    img = img8.astype(np.float32)
+    h, w = img8.shape
+    tile_offsets = np.zeros((h, len(boundaries) + 1), dtype=np.float32)
+    adapted: list[int] = []
+    fallback: list[int] = []
+    for index, x in enumerate(boundaries):
+        left, right = img[:, max(0, x - GRID_VERTICAL_BAND):x], img[:, x:min(w, x + GRID_VERTICAL_BAND)]
+        lm, rm = tissue[:, max(0, x - GRID_VERTICAL_BAND):x], tissue[:, x:min(w, x + GRID_VERTICAL_BAND)]
+        left_count = lm.sum(axis=1)
+        right_count = rm.sum(axis=1)
+        paired_count = np.minimum(left_count, right_count)
+        valid = paired_count >= GRID_LOCAL_MIN_PAIRED_PIXELS
+        global_step = float(estimate_step(img, tissue, x, band=GRID_VERTICAL_BAND))
+        local = np.full(h, global_step, dtype=np.float32)
+        # Sparse boundaries do not have enough evidence for a row-specific
+        # profile.  Keep the common tile-level step instead: it preserves
+        # continuity through the small tissue fragment without allowing it to
+        # impose a different correction for every row.
+        if int(valid.sum()) < max(12, int(h * GRID_LOCAL_MIN_PAIRED_ROWS)):
+            fallback.append(x)
+        elif abs(global_step) >= 3.0:
+            raw = np.zeros(h, dtype=np.float32)
+            raw[valid] = (np.where(rm[valid], right[valid], 0).sum(axis=1) / np.maximum(rm[valid].sum(axis=1), 1) - np.where(lm[valid], left[valid], 0).sum(axis=1) / np.maximum(lm[valid].sum(axis=1), 1))
+            # Weight each row by actual paired support, rather than giving
+            # one-pixel and four-pixel rows the same influence.
+            weight = np.clip(paired_count.astype(np.float32) / GRID_VERTICAL_BAND, 0.0, 1.0)
+            weight[~valid] = 0.0
+            numerator = cv2.GaussianBlur((raw * weight).reshape(-1, 1), (1, 0), 32, borderType=cv2.BORDER_REPLICATE).ravel()
+            denominator = cv2.GaussianBlur(weight.reshape(-1, 1), (1, 0), 32, borderType=cv2.BORDER_REPLICATE).ravel()
+            smooth = np.divide(numerator, denominator, out=np.full(h, global_step, dtype=np.float32), where=denominator > 0.45)
+            blend = 0.60 if abs(global_step) >= 6.0 else 0.35
+            cap = min(8.0, max(3.0, abs(global_step) * 0.75))
+            local = np.clip(global_step + blend * (smooth - global_step), global_step - cap, global_step + cap)
+            local[denominator <= 0.45] = global_step
+            adapted.append(x)
+        tile_offsets[:, index + 1:] += local[:, None]
+    # Preserve the measured boundary-to-boundary differences.  Removing a
+    # fitted left-to-right trend also removes part of every real cumulative
+    # tile correction, which leaves exactly the vertical seams this routine
+    # is meant to eliminate.  Median-centering only changes the image-wide
+    # brightness reference and cannot change any boundary jump.
+    tile_offsets -= np.median(tile_offsets, axis=1, keepdims=True)
+    out = img.copy()
+    intervals = [0] + boundaries + [w]
+    for index, (lo, hi) in enumerate(zip(intervals[:-1], intervals[1:])):
+        region = out[:, lo:hi]
+        mask = tissue[:, lo:hi]
+        region[mask] -= np.broadcast_to(tile_offsets[:, index:index + 1], region.shape)[mask]
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    return out, adapted, fallback
+
+
+def _grid_background_floor(img8: np.ndarray) -> int:
+    """Estimate a conservative low-signal background cutoff for display-safe
+    Grid-estimated output.
+
+    Tile illumination is not measurable outside tissue.  Leaving low-level
+    scanner background intact therefore exposes a checkerboard even after
+    valid tissue correction.  Otsu provides a per-image scale; clamping to
+    12..24 keeps the operation limited to dark background rather than dim
+    anatomical signal.
+    """
+    otsu, _ = cv2.threshold(img8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return int(np.clip(round(float(otsu) * 0.25), GRID_BACKGROUND_FLOOR_MIN, GRID_BACKGROUND_FLOOR_MAX))
+
+
+def _normalize_grid_background(img8: np.ndarray, source: np.ndarray) -> tuple[np.ndarray, int]:
+    """Set only source low-signal background to one black reference level."""
+    floor = _grid_background_floor(source)
+    out = img8.copy()
+    out[source <= floor] = 0
+    return out, floor
+
+
+def correct_grid_estimated(img8: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+    """Two-axis image-only correction used by Grid-estimated preview/process."""
+    tissue = img8 > 8
+    h_period, h_bounds = _periodic_grid_positions(img8, transpose=True)
+    horizontal_reliable = _axis_has_reliable_grid_steps(img8.T, tissue.T, h_bounds, band=GRID_HORIZONTAL_BAND)
+    if horizontal_reliable:
+        ramped, ramp_slope = _horizontal_ramp(img8, h_period, h_bounds, tissue)
+        horizontal, h_info = correct(
+            ramped.T,
+            band=GRID_HORIZONTAL_BAND,
+            tissue_mask=tissue.T,
+        )
+        horizontal = horizontal.T
+    else:
+        h_bounds = []
+        h_period = None
+        ramp_slope = 0.0
+        horizontal = img8.copy()
+        h_info = {"period": None, "n_seams": 0, "skipped": "insufficient_consistent_steps"}
+    v_period, v_bounds = _periodic_grid_positions(horizontal)
+    corrected, adapted, fallback = _vertical_local_grid(horizontal, v_bounds, tissue)
+    corrected, background_floor = _normalize_grid_background(corrected, img8)
+    return corrected, {
+        "period": v_period, "seam_positions": v_bounds, "n_seams": len(v_bounds),
+        "n_seams_vertical": len(v_bounds), "n_seams_horizontal": len(h_bounds),
+        "seam_positions_vertical": v_bounds, "seam_positions_horizontal": h_bounds,
+        "horizontal_period": h_period, "horizontal_ramp_slope": round(ramp_slope, 4),
+        "horizontal_reliable": horizontal_reliable,
+        "vertical_local_adapted": adapted, "vertical_local_fallback": fallback,
+        "vertical_band": GRID_VERTICAL_BAND,
+        "horizontal_band": GRID_HORIZONTAL_BAND, "horizontal_info": h_info,
+        "background_floor": background_floor,
     }
 
 
@@ -1171,7 +1432,7 @@ def correct_file_to(
             tuned_band, _residual, _trace = _autotune_band(img8)
             if tuned_band is not None:
                 band_used = tuned_band
-        corrected, info = correct(img8, band=band_used)
+        corrected, info = correct_grid_estimated(img8)
         resolved_mode = "grid_estimated"
     info = {**info, "mode": resolved_mode, "band": band_used}
     _atomic_write_png(Path(dest), corrected)
@@ -1281,7 +1542,7 @@ def _process_channel(
                         f"seam_autotune {label}{fpath.name} band={tuned_band} "
                         f"residual={tuned_residual}"
                     )
-                out_u8, info = correct(img8, band=band_used)
+                out_u8, info = correct_grid_estimated(img8)
             dest = output_dir / fpath.name
             _write_like(fpath, dest, out_u8)
             written.append(fpath.name)
@@ -1355,7 +1616,7 @@ def run_preview(args) -> int:
                 if tuned_band is not None:
                     band = tuned_band
             _progress(40, "Detecting + correcting seams...")
-            corrected, info = correct(full, band=band)
+            corrected, info = correct_grid_estimated(full)
         _log(
             f"seam_preview mode={seam_mode} correlation={info.get('corr')} "
             f"n_seams={info.get('n_seams')} "

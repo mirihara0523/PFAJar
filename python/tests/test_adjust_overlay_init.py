@@ -75,6 +75,16 @@ def test_adjust_defers_repaint_until_overlay_flag():
     assert (_PY_DIR / "structure_catalog.py").is_file()
 
 
+def test_compare_adjacent_selection_highlight_requires_overlay():
+    """Compare mode must not leave its purple selection visible when hidden."""
+    src = (_PY_DIR / "adjust.py").read_text(encoding="utf-8")
+    start = src.index("# Highlight the currently selected paint target within the\n        # adjacent")
+    end = src.index("\n        pixmap = QPixmap.fromImage", start)
+    highlight_block = src[start:end]
+    assert "self.overlay_visible" in highlight_block
+    assert "and self.selected_region_id is not None" in highlight_block
+
+
 def test_init_paint_region_controls_after_paint_swatch():
     """Paint-target widgets must exist before hierarchy/area combo population."""
     src = (_PY_DIR / "adjust.py").read_text(encoding="utf-8")
