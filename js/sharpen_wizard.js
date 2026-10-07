@@ -9,10 +9,12 @@ function getToolParams() {
 	var radiusEl = document.getElementById("sharpenRadius");
 	var amountEl = document.getElementById("sharpenAmount");
 	var eqEl = document.getElementById("sharpenEqualize");
+	var workersEl = document.getElementById("sharpenWorkers");
 	return {
 		radius: radiusEl ? Number(radiusEl.value) : 3,
 		amount: amountEl ? Number(amountEl.value) : 2,
 		equalize: eqEl ? eqEl.checked : true,
+		workers: workersEl ? Number(workersEl.value) || 2 : 2,
 	};
 }
 
@@ -39,6 +41,7 @@ projectIndexBusy.populatePage(function () {
 				radius: params.radius,
 				amount: params.amount,
 				equalize: params.equalize,
+				workers: params.workers,
 			};
 		},
 	});

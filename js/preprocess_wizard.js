@@ -166,8 +166,29 @@ function listSliceImageFiles(leafAbs) {
 
 function sliceStemFromName(name) {
 	var base = path.basename(name);
-	var dot = base.indexOf(".");
-	return dot >= 0 ? base.slice(0, dot) : base;
+	// Slice IDs frequently contain periods (for example,
+	// 202607.M554.M579.01.63.tif).  Only strip the image extension; using
+	// the first period makes previews and branch-to-branch selection ambiguous.
+	var lower = base.toLowerCase();
+	if (lower.endsWith(".ome.tiff")) {
+		return base.slice(0, -".ome.tiff".length);
+	}
+	if (lower.endsWith(".ome.tif")) {
+		return base.slice(0, -".ome.tif".length);
+	}
+	return base.replace(/\.(tif|tiff|png|jpe?g)$/i, "");
+}
+
+function sliceIndexById(slices, sliceId) {
+	if (!sliceId || !Array.isArray(slices)) {
+		return -1;
+	}
+	for (var i = 0; i < slices.length; i++) {
+		if (sliceStemFromName(slices[i] && slices[i].name) === sliceId) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 function findSignalPreviewAbs(bundleRoot, sliceName, signalBranch) {
@@ -257,6 +278,48 @@ function fitViewportToImage(state) {
 	);
 }
 
+// Preserve the user's focus and zoom when a branch reloads the same slice.
+// The source images can have different preview dimensions, so store the
+// focused point as normalized image coordinates and the zoom relative to fit.
+function captureViewportView(state) {
+	var imgW = state.baseNaturalW || 0;
+	var imgH = state.baseNaturalH || 0;
+	var viewW = state.viewW || DEFAULT_VIEW_W;
+	var viewH = state.viewH || DEFAULT_VIEW_H;
+	var scale = state.scale || 0;
+	if (!imgW || !imgH || !scale) {
+		return null;
+	}
+	var fitScale = fitScaleToViewport(imgW, imgH, viewW, viewH);
+	return {
+		centerX: (viewW / 2 - (state.panX || 0)) / scale / imgW,
+		centerY: (viewH / 2 - (state.panY || 0)) / scale / imgH,
+		zoomRatio: fitScale > 0 ? scale / fitScale : 1,
+	};
+}
+
+function restoreViewportView(state, saved) {
+	if (!saved || !state.baseNaturalW || !state.baseNaturalH) {
+		fitViewportToImage(state);
+		return;
+	}
+	var viewW = state.viewW || DEFAULT_VIEW_W;
+	var viewH = state.viewH || DEFAULT_VIEW_H;
+	var fitScale = fitScaleToViewport(
+		state.baseNaturalW,
+		state.baseNaturalH,
+		viewW,
+		viewH,
+	);
+	var ratio = Number(saved.zoomRatio);
+	if (!isFinite(ratio) || ratio <= 0) {
+		ratio = 1;
+	}
+	state.scale = Math.min(8, Math.max(0.1, fitScale * ratio));
+	state.panX = viewW / 2 - saved.centerX * state.baseNaturalW * state.scale;
+	state.panY = viewH / 2 - saved.centerY * state.baseNaturalH * state.scale;
+}
+
 function computePreviewZoomPolicy(state) {
 	var previewW = state.baseNaturalW || 0;
 	var previewH = state.baseNaturalH || 0;
@@ -264,7 +327,7 @@ function computePreviewZoomPolicy(state) {
 	var fullH = state.fullNaturalH || 0;
 	var viewW = state.viewW || DEFAULT_VIEW_W;
 	var viewH = state.viewH || DEFAULT_VIEW_H;
-	var budget = PREVIEW_PIXEL_BUDGET;
+	var budget = state.allowLargePreviews ? Infinity : PREVIEW_PIXEL_BUDGET;
 
 	state.maxFullResPreviewPixels = budget;
 
@@ -300,7 +363,7 @@ function isPreviewZoomEligible(state) {
 	if (!state.fullNaturalW || !state.fullNaturalH) {
 		return false;
 	}
-	if (!state.minPreviewScale) {
+	if (state.allowLargePreviews || !state.minPreviewScale) {
 		return true;
 	}
 	return (state.scale || 1) >= state.minPreviewScale - 1e-6;
@@ -340,7 +403,7 @@ function resolvePreviewFilterRequest(state, roi, sourceSliceAbs) {
 		return { ready: false, reason: "waiting_for_dimensions" };
 	}
 
-	if (state.minPreviewScale && (state.scale || 1) < state.minPreviewScale - 1e-6) {
+	if (!state.allowLargePreviews && state.minPreviewScale && (state.scale || 1) < state.minPreviewScale - 1e-6) {
 		return { ready: false, reason: "zoom_too_far" };
 	}
 
@@ -447,7 +510,7 @@ function resolvePreviewRequest(state, filterBitmapRef, sourceSliceAbs, displayDi
 		return { ready: false, reason: "waiting_for_dimensions" };
 	}
 
-	if (state.minPreviewScale && (state.scale || 1) < state.minPreviewScale - 1e-6) {
+	if (!state.allowLargePreviews && state.minPreviewScale && (state.scale || 1) < state.minPreviewScale - 1e-6) {
 		return { ready: false, reason: "zoom_too_far" };
 	}
 
@@ -724,7 +787,7 @@ var probeImageDimensionsCache = new Map(); // absPath -> {width, height}
 function probeImageDimensionsPy(absPath, cb) {
 	var cached = probeImageDimensionsCache.get(absPath);
 	if (cached) {
-		cb(cached.width, cached.height);
+		cb(cached.width, cached.height, "");
 		return;
 	}
 	var reqId =
@@ -736,12 +799,15 @@ function probeImageDimensionsPy(absPath, cb) {
 		ipcRenderer.removeListener("indexMetadataResult", onResult);
 		try {
 			var map = payload.map || {};
+			var errors = payload.errors || {};
 			var meta = map[absPath] || map[path.normalize(absPath)] || {};
+			var metadataError = errors[absPath] || errors[path.normalize(absPath)] || "";
 			// path keys from Python may differ slightly; take first entry
 			if (!meta.width && !meta.height) {
 				var keys = Object.keys(map);
 				if (keys.length === 1) {
 					meta = map[keys[0]] || {};
+					metadataError = metadataError || errors[keys[0]] || "";
 				}
 			}
 			var w = meta.width || 0;
@@ -749,9 +815,9 @@ function probeImageDimensionsPy(absPath, cb) {
 			if (w && h) {
 				probeImageDimensionsCache.set(absPath, { width: w, height: h });
 			}
-			cb(w, h);
+			cb(w, h, metadataError);
 		} catch (_e) {
-			cb(0, 0);
+			cb(0, 0, "Metadata response could not be read.");
 		}
 	}
 	ipcRenderer.on("indexMetadataResult", onResult);
@@ -759,19 +825,19 @@ function probeImageDimensionsPy(absPath, cb) {
 		ipcRenderer.send("runIndexMetadata", { reqId: reqId, paths: [absPath] });
 	} catch (_err) {
 		ipcRenderer.removeListener("indexMetadataResult", onResult);
-		cb(0, 0);
+		cb(0, 0, "Could not start the image metadata reader.");
 	}
 }
 
 function loadFullResDimensions(absPath, cb) {
 	if (!absPath) {
-		cb(0, 0);
+		cb(0, 0, "No source image is selected.");
 		return;
 	}
 	var root = project.isActive() ? project.getBundleRoot() : "";
 	var fromIndex = lookupImageDimensionsFromIndex(absPath, root);
 	if (fromIndex) {
-		cb(fromIndex.width, fromIndex.height);
+		cb(fromIndex.width, fromIndex.height, "");
 		return;
 	}
 	if (isProcessableTiffName(absPath)) {
@@ -780,10 +846,10 @@ function loadFullResDimensions(absPath, cb) {
 	}
 	var fullImg = new Image();
 	fullImg.onload = function () {
-		cb(fullImg.naturalWidth, fullImg.naturalHeight);
+			cb(fullImg.naturalWidth, fullImg.naturalHeight, "");
 	};
 	fullImg.onerror = function () {
-		cb(0, 0);
+			cb(0, 0, "The source image could not be opened.");
 	};
 	fullImg.src = fileUrlForPath(absPath) + "?t=" + Date.now();
 }
@@ -818,6 +884,7 @@ function wirePreprocessWizard(opts) {
 		baseNaturalH: 0,
 		fullNaturalW: 0,
 		fullNaturalH: 0,
+		previewDimensionError: "",
 		// Bumped once per loadBaseSliceImage() call (opts.autoPreviewOnSliceChange,
 		// 2026-09-09) -- lets that call's own async completion callbacks tell
 		// whether a newer slice load has since superseded them.
@@ -885,11 +952,19 @@ function wirePreprocessWizard(opts) {
 	function updatePreviewZoomWarning() {
 		computePreviewZoomPolicy(state);
 		var eligible = isPreviewZoomEligible(state) || state.showingFiltered;
+		var dimensionsUnavailable = !state.fullNaturalW || !state.fullNaturalH;
+		var unavailableMessage =
+			"Could not read full-resolution dimensions for " +
+			((state.currentSlice && state.currentSlice.name) || "this slice") +
+			". " +
+			(state.previewDimensionError || "Preview is unavailable for this slice.");
 		if (previewZoomWarning) {
 			previewZoomWarning.classList.toggle("d-none", eligible);
 			if (!eligible) {
 				previewZoomWarning.textContent =
-					state.previewZoomHint || PREVIEW_ZOOM_WARNING;
+					(dimensionsUnavailable
+						? unavailableMessage
+						: state.previewZoomHint || PREVIEW_ZOOM_WARNING);
 			}
 		}
 		if (previewFilterBtn) {
@@ -899,7 +974,9 @@ function wirePreprocessWizard(opts) {
 		if (previewStatus && !state.previewBusy) {
 			if (!eligible) {
 				previewStatus.textContent =
-					state.previewZoomHint || PREVIEW_ZOOM_WARNING;
+					(dimensionsUnavailable
+						? unavailableMessage
+						: state.previewZoomHint || PREVIEW_ZOOM_WARNING);
 			} else if (!state.showingFiltered) {
 				previewStatus.textContent = PREVIEW_READY_HINT;
 			}
@@ -1116,10 +1193,12 @@ function wirePreprocessWizard(opts) {
 		}
 	}
 
-	function loadBaseSliceImage() {
+	function loadBaseSliceImage(loadOpts) {
+		loadOpts = loadOpts || {};
 		if (!state.currentSlice || !previewImg) {
 			return;
 		}
+		var savedView = loadOpts.preserveView ? captureViewportView(state) : null;
 		var root = bundleRoot();
 		var lowRes = findSignalPreviewAbs(
 			root,
@@ -1128,9 +1207,18 @@ function wirePreprocessWizard(opts) {
 		);
 		state.baseAbs = lowRes || state.currentSlice.abs;
 		clearFilteredOverlay();
-		state.scale = 1;
-		state.panX = 0;
-		state.panY = 0;
+		if (!savedView) {
+			state.scale = 1;
+			state.panX = 0;
+			state.panY = 0;
+		}
+		// Do not let dimensions from the prior branch/slice keep Preview enabled
+		// while this source is still being resolved.
+		state.fullNaturalW = 0;
+		state.fullNaturalH = 0;
+		state.baseNaturalW = 0;
+		state.baseNaturalH = 0;
+		state.previewDimensionError = "";
 		if (previewStatus) {
 			previewStatus.textContent = PREVIEW_READY_HINT;
 		}
@@ -1165,9 +1253,25 @@ function wirePreprocessWizard(opts) {
 				requestPreview();
 			}
 		}
-		loadFullResDimensions(state.currentSlice.abs, function (fw, fh) {
+		loadFullResDimensions(state.currentSlice.abs, function (fw, fh, dimensionError) {
+			if (state.sliceLoadGen !== myGen) {
+				return;
+			}
 			state.fullNaturalW = fw;
 			state.fullNaturalH = fh;
+			state.previewDimensionError = dimensionError || "";
+			console.log(
+				"LOG: preprocess_preview_dimensions " +
+					JSON.stringify({
+						step: stepId,
+						branch: state.signalBranch,
+						slice: state.currentSlice.name,
+						full_width: fw,
+						full_height: fh,
+						source: state.currentSlice.abs,
+						preview_source: state.baseAbs,
+					}),
+			);
 			computePreviewZoomPolicy(state);
 			updatePreviewZoomWarning();
 			if (pendingPreviewAfterDims) {
@@ -1177,7 +1281,10 @@ function wirePreprocessWizard(opts) {
 				} else if (previewStatus) {
 					pendingPreviewAfterDims = false;
 					previewStatus.textContent =
-						"Could not read full-resolution image dimensions.";
+						"Could not read full-resolution dimensions for " +
+						state.currentSlice.name +
+						". " +
+						(state.previewDimensionError || "Preview is unavailable for this slice.");
 				}
 			}
 			dimsReady = true;
@@ -1185,9 +1292,13 @@ function wirePreprocessWizard(opts) {
 		});
 		var img = new Image();
 		img.onload = function () {
+			if (state.sliceLoadGen !== myGen) {
+				return;
+			}
 			baseBitmap = img;
 			state.baseNaturalW = img.naturalWidth;
 			state.baseNaturalH = img.naturalHeight;
+			restoreViewportView(state, savedView);
 			applyPanZoomCss();
 			computePreviewZoomPolicy(state);
 			updatePreviewZoomWarning();
@@ -1196,6 +1307,9 @@ function wirePreprocessWizard(opts) {
 			maybeAutoPreview();
 		};
 		img.onerror = function () {
+			if (state.sliceLoadGen !== myGen) {
+				return;
+			}
 			if (previewStatus) {
 				previewStatus.textContent = "Could not load slice image.";
 			}
@@ -1385,6 +1499,12 @@ function wirePreprocessWizard(opts) {
 		if (!root || !sourceSelect) {
 			return;
 		}
+		// Keep the same physical section when a branch exposes it.  Different
+		// branches can have different extensions, so match on the full slice ID
+		// rather than the select index or filename extension.
+		var previousSliceId = state.currentSlice
+			? sliceStemFromName(state.currentSlice.name)
+			: "";
 		var rel = sourceSelect.value;
 		persistSourceRel(rel);
 		if (state.signalBranch === "dapi") {
@@ -1407,6 +1527,11 @@ function wirePreprocessWizard(opts) {
 				? dapiSourceFiles(root)
 				: listSliceImageFiles(state.sourceDataset.abs))
 			: [];
+		var nextSliceIndex = sliceIndexById(state.slices, previousSliceId);
+		var preserveView = !!previousSliceId && nextSliceIndex >= 0;
+		if (nextSliceIndex < 0) {
+			nextSliceIndex = 0;
+		}
 		if (sliceSelect) {
 			sliceSelect.innerHTML = "";
 			for (var s = 0; s < state.slices.length; s++) {
@@ -1417,12 +1542,15 @@ function wirePreprocessWizard(opts) {
 			}
 		}
 		if (state.slices.length) {
-			state.currentSlice = state.slices[0];
+			state.currentSlice = state.slices[nextSliceIndex];
+			if (sliceSelect) {
+				sliceSelect.value = String(nextSliceIndex);
+			}
 		} else {
 			state.currentSlice = null;
 		}
 		cancelIdlePreview();
-		loadBaseSliceImage();
+		loadBaseSliceImage({ preserveView: preserveView });
 	}
 
 	function onSliceChange() {
@@ -1467,6 +1595,9 @@ function wirePreprocessWizard(opts) {
 	}
 
 	function sendPreviewIpc(resolved, previewPayload) {
+		if (stepId === "sharpen") {
+			state.previewRequestedAt = Date.now();
+		}
 		state.previewBusy = true;
 		updateEqualizeNotice(null);
 		showPreviewLoading(true);
@@ -1554,6 +1685,14 @@ function wirePreprocessWizard(opts) {
 	}
 
 	function wirePreviewPane() {
+		var largePreviewOption = document.getElementById("allowLargePreviews");
+		if (stepId === "sharpen" && largePreviewOption) {
+			largePreviewOption.addEventListener("change", function () {
+				state.allowLargePreviews = largePreviewOption.checked;
+				computePreviewZoomPolicy(state);
+				updatePreviewZoomWarning();
+			});
+		}
 		if (!viewport || !previewImg) {
 			return;
 		}
@@ -1585,7 +1724,7 @@ function wirePreprocessWizard(opts) {
 			"wheel",
 			function (ev) {
 				ev.preventDefault();
-				if (!opts.comparisonPreview) {
+				if (!opts.comparisonPreview && stepId !== "sharpen") {
 					clearFilterOnViewChange();
 				}
 				var rect = viewport.getBoundingClientRect();
@@ -1606,7 +1745,7 @@ function wirePreprocessWizard(opts) {
 		var lastX = 0;
 		var lastY = 0;
 		viewport.addEventListener("mousedown", function (ev) {
-			if (!opts.comparisonPreview) {
+			if (!opts.comparisonPreview && stepId !== "sharpen") {
 				clearFilterOnViewChange();
 			}
 			dragging = true;
@@ -1626,10 +1765,46 @@ function wirePreprocessWizard(opts) {
 		window.addEventListener("mouseup", function () {
 			if (dragging) {
 				updatePreviewZoomWarning();
+				if (stepId === "sharpen" && state.showingFiltered && filteredBitmap && previewStatus) {
+					var right = state.panX + filteredBitmap.width * state.scale;
+					var bottom = state.panY + filteredBitmap.height * state.scale;
+					if (state.panX > 0 || state.panY > 0 || right < state.viewW || bottom < state.viewH) {
+						previewStatus.textContent = "Preview retained. Only the processed region is shown; click Preview filter to refine it.";
+					}
+				}
 				scheduleIdlePreview();
 			}
 			dragging = false;
 		});
+	}
+
+	function syncPreviewPaneHeight() {
+		if (!viewport) {
+			return;
+		}
+		var controls = branchSelect && branchSelect.closest
+			? branchSelect.closest(".col-md-4")
+			: null;
+		if (!controls) {
+			return;
+		}
+		var controlsRect = controls.getBoundingClientRect();
+		// Bootstrap stretch-aligns sibling columns, so the column's own height
+		// can include blank space introduced by the preview pane. The Next button
+		// marks the true bottom of the Tune controls without that feedback loop.
+		var controlsBottom = step1Next
+			? step1Next.getBoundingClientRect().bottom
+			: controlsRect.bottom;
+		var controlsHeight = Math.round(controlsBottom - controlsRect.top);
+		if (controlsHeight > 0) {
+			viewport.style.height = controlsHeight + "px";
+		}
+		var rect = viewport.getBoundingClientRect();
+		state.viewW = Math.max(200, Math.floor(rect.width) || DEFAULT_VIEW_W);
+		state.viewH = Math.max(200, Math.floor(rect.height) || DEFAULT_VIEW_H);
+		computePreviewZoomPolicy(state);
+		updatePreviewZoomWarning();
+		applyPanZoomCss();
 	}
 
 	function datasetStemsForPlan(datasetAbs, plan) {
@@ -1766,6 +1941,9 @@ function wirePreprocessWizard(opts) {
 			payload.radius = params.radius;
 			payload.amount = params.amount;
 			payload.equalize = !!params.equalize;
+			if (stepId === "sharpen") {
+				payload.workers = Math.max(1, Math.min(4, Number(params.workers) || 2));
+			}
 		}
 		fs.writeFileSync(configPath, JSON.stringify(payload, null, 2));
 		return configPath;
@@ -1973,8 +2151,22 @@ function wirePreprocessWizard(opts) {
 					: filt.naturalWidth;
 				fitViewportToDimensions(state, fitW, filt.naturalHeight);
 				renderPreviewComposite();
+				if (stepId === "sharpen" && state.previewRequestedAt &&
+					/^(1|true|yes|on)$/i.test(process.env.MASONJAR_PERF || "")) {
+					requestAnimationFrame(function () {
+						ipc.send("perfLog", "LOG: perf sharpen.preview.request_to_display " +
+							(Date.now() - state.previewRequestedAt) + "ms");
+					});
+				}
 				if (previewStatus) {
-					previewStatus.textContent = stacked
+					var fullPreview = state.lastFullResFilterRoi &&
+						state.lastFullResFilterRoi.x === 0 && state.lastFullResFilterRoi.y === 0 &&
+						state.lastFullResFilterRoi.w >= state.fullNaturalW &&
+						state.lastFullResFilterRoi.h >= state.fullNaturalH;
+					previewStatus.textContent = stepId === "sharpen"
+						? (fullPreview ? "Full-image preview" : "Filtered region") +
+						  " (" + data.width + "x" + data.height + " px) — retained during pan/zoom."
+						: stacked
 						? "Left: Original · Right: Corrected (" +
 						  data.width +
 						  "x" +
@@ -2073,6 +2265,20 @@ function wirePreprocessWizard(opts) {
 	}
 
 	wirePreviewPane();
+	// The preview pane shares a row with the Tune controls. Match the actual
+	// controls height instead of imposing a fixed maximum, and keep that match
+	// as responsive layout changes alter either column.
+	syncPreviewPaneHeight();
+	var previewControlsColumn = branchSelect && branchSelect.closest
+		? branchSelect.closest(".col-md-4")
+		: null;
+	if (typeof ResizeObserver !== "undefined" && previewControlsColumn) {
+		var previewPaneResizeObserver = new ResizeObserver(function () {
+			syncPreviewPaneHeight();
+		});
+		previewPaneResizeObserver.observe(previewControlsColumn);
+	}
+	window.addEventListener("resize", syncPreviewPaneHeight);
 	ensurePreprocessNav();
 	refreshBranches();
 	setStep(1);
@@ -2097,11 +2303,14 @@ module.exports = {
 	shouldSchedulePreviewOnInteraction: shouldSchedulePreviewOnInteraction,
 	findSignalPreviewAbs: findSignalPreviewAbs,
 	findLowResPreviewAbs: findLowResPreviewAbs,
+	sliceIndexById: sliceIndexById,
 	scaleRoiForFullRes: scaleRoiForFullRes,
 	fitScaleToViewport: fitScaleToViewport,
 	centerPanForFit: centerPanForFit,
 	fitViewportToImage: fitViewportToImage,
 	fitViewportToDimensions: fitViewportToDimensions,
+	captureViewportView: captureViewportView,
+	restoreViewportView: restoreViewportView,
 	resolvePreviewFilterRequest: resolvePreviewFilterRequest,
 	resolvePreviewRequest: resolvePreviewRequest,
 	computePreviewZoomPolicy: computePreviewZoomPolicy,

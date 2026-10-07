@@ -397,6 +397,14 @@ function renderParamSection(stepId, body, params) {
 					" />",
 			) +
 			fieldRow(
+				"Parallel workers",
+				'<select class="form-select form-select-sm" id="sharpen-workers">' +
+				'<option value="2" ' + (Number(params.workers || 2) === 2 ? "selected" : "") + '>Automatic (2)</option>' +
+					'<option value="1" ' + (Number(params.workers) === 1 ? "selected" : "") + '>1 (lower memory)</option>' +
+					'<option value="4" ' + (Number(params.workers) === 4 ? "selected" : "") + '>4 (more memory)</option>' +
+					"</select>",
+			) +
+			fieldRow(
 				"Multi-channel",
 				'<input type="checkbox" class="form-check-input" id="' +
 					prefix +
@@ -1082,6 +1090,7 @@ function collectParamsFromUi() {
 			next.radius = parseFloat(qs("sharpen-radius").value);
 			next.amount = parseFloat(qs("sharpen-amount").value);
 			next.equalize = !!(qs("sharpen-equalize") && qs("sharpen-equalize").checked);
+			next.workers = parseInt(qs("sharpen-workers").value, 10) || 2;
 			next.signalDatasetKind = qs("sharpen-signalKind")
 				? qs("sharpen-signalKind").value
 				: "max";

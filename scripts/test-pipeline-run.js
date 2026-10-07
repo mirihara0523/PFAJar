@@ -10,6 +10,8 @@ helpers.ensureLocalStorage();
 var project = require("../js/project");
 var pipelineRun = require("../js/pipeline_run");
 var fileIndex = require("../js/file_index");
+var pipelineRuns = require("../js/pipeline_runs");
+var detectCommon = require("../js/detect_common");
 
 function matchedIndexFiles() {
 	return [
@@ -158,6 +160,64 @@ function testPrepareDetectMergeUsesOutputRunRel() {
 	helpers.rmDir(bundle);
 }
 
+function testDottedSliceIdsSurviveDetectionAndCountPlan() {
+	var dotted = "202607.M554.M579.01.63";
+	assert.strictEqual(fileIndex.sliceIdFromFilename(dotted + ".tif"), dotted);
+	assert.strictEqual(detectCommon.sliceStemFromImageBasename(dotted + ".tif"), dotted);
+
+	var images = helpers.tmpDir("mj-dotted-images-");
+	helpers.touchImage(images, dotted + ".tif");
+	assert.deepStrictEqual(pipelineRuns.listImageSliceStems(images), [dotted]);
+	helpers.rmDir(images);
+
+	var bundle = helpers.tmpDir("mj-dotted-count-");
+	project.createProject({ bundleRoot: bundle, name: "Dotted" });
+	helpers.writeFileIndex(bundle, [
+		{
+			sliceId: dotted,
+			role: "dapi",
+			relPath: "data/counting/00_dapi/" + dotted + ".png",
+			metadata: { width: 512, height: 512 },
+		},
+		{
+			sliceId: dotted,
+			role: "max",
+			relPath: "data/counting/03_max/somata/max/run/" + dotted + ".tif",
+			metadata: { width: 512, height: 512 },
+		},
+		{
+			sliceId: dotted,
+			role: "slices",
+			relPath: "data/counting/01_slices/Annotation_" + dotted + ".pkl",
+			metadata: {},
+		},
+	]);
+	var annotation = path.join(
+		bundle,
+		project.CANONICAL_ROLES.slices,
+		"Annotation_" + dotted + ".pkl",
+	);
+	var prediction = path.join(
+		bundle,
+		project.CANONICAL_ROLES.predictions,
+		"somata/run",
+		"Predictions_" + dotted + ".pkl",
+	);
+	fs.mkdirSync(path.dirname(annotation), { recursive: true });
+	fs.mkdirSync(path.dirname(prediction), { recursive: true });
+	fs.writeFileSync(annotation, "x");
+	fs.writeFileSync(prediction, "x");
+	var proj = project.getProject();
+	proj.processing.active_runs = { predictions: "somata/run", slices: "" };
+	project.saveProjectJson();
+
+	var result = pipelineRun.preparePipelineRun("count", "overwrite");
+	assert.deepStrictEqual(result.toProcess, [dotted]);
+
+	project.clearActiveProject();
+	helpers.rmDir(bundle);
+}
+
 var tests = [
 	testInactiveProject,
 	testPrepareMergeAlign,
@@ -166,6 +226,7 @@ var tests = [
 	testPrepareNoIndex,
 	testPlanRunReexport,
 	testPrepareDetectMergeUsesOutputRunRel,
+	testDottedSliceIdsSurviveDetectionAndCountPlan,
 ];
 
 for (var i = 0; i < tests.length; i++) {

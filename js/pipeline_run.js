@@ -73,6 +73,7 @@ function preparePipelineRun(stepId, runMode, options) {
 	var countExtra = "";
 
 	if (stepId === "count") {
+		var countPlanStarted = Date.now();
 		var predLeaf = pipelineRuns.resolveActiveRunLeafAbs("predictions");
 		var slicesLeaf = pipelineRuns.resolveActiveRunLeafAbs("slices");
 		var failedAlign = project.getFailedSliceIds("align");
@@ -81,19 +82,39 @@ function preparePipelineRun(stepId, runMode, options) {
 			failedAlignSet[failedAlign[fa]] = true;
 		}
 		var before = plan.toProcess.length;
+		var countStats = {
+			candidates: candidateIds.length,
+			planned: before,
+			skipped_existing: plan.skipped.length,
+			failed_align: 0,
+			missing_prediction: 0,
+			missing_alignment: 0,
+			eligible: 0,
+			mode: mode,
+			prediction_run: activeRuns.predictions || "",
+			slices_run: activeRuns.slices || "",
+		};
 		plan.toProcess = plan.toProcess.filter(function (sid) {
-			return (
-				!failedAlignSet[sid] &&
-				fileIndex.predictionPklExistsForSlice(predLeaf, sid) &&
-				fileIndex.outputExistsForSlice(bundleRoot, "align", sid, roles, activeRuns)
-			);
+			if (failedAlignSet[sid]) {
+				countStats.failed_align += 1;
+				return false;
+			}
+			if (!fileIndex.predictionPklExistsForSlice(predLeaf, sid)) {
+				countStats.missing_prediction += 1;
+				return false;
+			}
+			if (!fileIndex.outputExistsForSlice(bundleRoot, "align", sid, roles, activeRuns)) {
+				countStats.missing_alignment += 1;
+				return false;
+			}
+			countStats.eligible += 1;
+			return true;
 		});
+		countStats.planning_ms = Date.now() - countPlanStarted;
+		console.log("LOG: perf count.plan " + JSON.stringify(countStats));
 		var dropped = before - plan.toProcess.length;
 		if (dropped) {
-			countExtra =
-				" " +
-				dropped +
-				" slice(s) skipped (no matching prediction PKL in the selected predictions folder).";
+			countExtra = " " + dropped + " slice(s) filtered.";
 		}
 		if (!predLeaf || !slicesLeaf) {
 			countExtra += " Choose predictions and slices on the Count page.";

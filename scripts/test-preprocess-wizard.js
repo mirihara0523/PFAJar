@@ -14,6 +14,35 @@ function testViewportRoi() {
 	assert.ok(roi.y >= 0);
 }
 
+function testViewportViewPreservedAcrossBranchReload() {
+	var oldState = {
+		baseNaturalW: 1000,
+		baseNaturalH: 500,
+		viewW: 500,
+		viewH: 400,
+		scale: 0.8,
+		panX: -180,
+		panY: -40,
+	};
+	var saved = preprocessWizard.captureViewportView(oldState);
+	assert.ok(saved);
+
+	var newState = {
+		baseNaturalW: 2000,
+		baseNaturalH: 1000,
+		viewW: 500,
+		viewH: 400,
+		scale: 1,
+		panX: 0,
+		panY: 0,
+	};
+	preprocessWizard.restoreViewportView(newState, saved);
+	var restored = preprocessWizard.captureViewportView(newState);
+	assert.ok(Math.abs(restored.centerX - saved.centerX) < 1e-9);
+	assert.ok(Math.abs(restored.centerY - saved.centerY) < 1e-9);
+	assert.ok(Math.abs(restored.zoomRatio - saved.zoomRatio) < 1e-9);
+}
+
 function testScaleRoiForFullRes() {
 	var roi = { x: 10, y: 20, w: 100, h: 80 };
 	var scaled = preprocessWizard.scaleRoiForFullRes(roi, 500, 400, 2000, 1600);
@@ -161,6 +190,10 @@ function testFindSignalPreviewAbs() {
 	fs.mkdirSync(prevDir, { recursive: true });
 	fs.writeFileSync(path.join(prevDir, "M528_s001_dapi.png"), "dapi");
 	fs.writeFileSync(path.join(prevDir, "M528_s001_rabies.png"), "rabies");
+	fs.writeFileSync(
+		path.join(prevDir, "202607.M554.M579.01.63_starters.png"),
+		"starters",
+	);
 	var rabies = preprocessWizard.findSignalPreviewAbs(
 		bundle,
 		"M528_s001.tif",
@@ -177,7 +210,30 @@ function testFindSignalPreviewAbs() {
 		"somata",
 	);
 	assert.strictEqual(missing, "");
+	var dotted = preprocessWizard.findSignalPreviewAbs(
+		bundle,
+		"202607.M554.M579.01.63.tif",
+		"starters",
+	);
+	assert.strictEqual(
+		dotted,
+		path.join(prevDir, "202607.M554.M579.01.63_starters.png"),
+		"dotted slice IDs must retain their full stem when resolving previews",
+	);
 	helpers.rmDir(bundle);
+}
+
+function testSliceIndexById() {
+	var slices = [
+		{ name: "202607.M554.M579.01.63.tif" },
+		{ name: "202607.M554.M579.01.64.tif" },
+	];
+	assert.strictEqual(
+		preprocessWizard.sliceIndexById(slices, "202607.M554.M579.01.64"),
+		1,
+		"branch changes should retain a matching full dotted slice ID",
+	);
+	assert.strictEqual(preprocessWizard.sliceIndexById(slices, "missing"), -1);
 }
 
 function testIsProcessableTiffName() {
@@ -315,6 +371,25 @@ function testFitScaleToViewport() {
 }
 
 testViewportRoi();
+// Large previews must preserve the entire requested ROI, including when
+// the same viewport is rejected by the default zoom policy.
+var largeState = {
+	baseNaturalW: 1000, baseNaturalH: 800,
+	fullNaturalW: 10000, fullNaturalH: 8000,
+	viewW: 1000, viewH: 800, scale: 1, minPreviewScale: 5,
+	allowLargePreviews: true,
+};
+preprocessWizard.computePreviewZoomPolicy(largeState);
+assert.strictEqual(preprocessWizard.isPreviewZoomEligible(largeState), true);
+var largeResult = preprocessWizard.resolvePreviewFilterRequest(
+	largeState, { x: 0, y: 0, w: 1000, h: 800 }, "full.tif",
+);
+assert.strictEqual(largeResult.ready, true);
+assert.deepStrictEqual(largeResult.roi, { x: 0, y: 0, w: 10000, h: 8000 });
+largeState.allowLargePreviews = false;
+preprocessWizard.computePreviewZoomPolicy(largeState);
+assert.strictEqual(preprocessWizard.isPreviewZoomEligible(largeState), false);
+testViewportViewPreservedAcrossBranchReload();
 testScaleRoiForFullRes();
 testFitScaleToViewport();
 testResolvePreviewFilterRequest();
@@ -325,6 +400,7 @@ testApplyCursorAnchoredZoom();
 testIsPreviewZoomEligible();
 testAutoStretchImageDataIfFlat();
 testFindSignalPreviewAbs();
+testSliceIndexById();
 testIsProcessableTiffName();
 testParsePreviewJson();
 testNoAutoPreviewOnInteraction();

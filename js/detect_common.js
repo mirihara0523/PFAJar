@@ -10,8 +10,7 @@ function sliceStemFromImageBasename(basename) {
 	if (/\.ome$/i.test(stem)) {
 		stem = path.parse(stem).name;
 	}
-	var dot = stem.indexOf(".");
-	return dot >= 0 ? stem.slice(0, dot) : stem;
+	return stem;
 }
 
 function listInputSliceStems(indirPath) {

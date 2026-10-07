@@ -1452,25 +1452,18 @@ function handoffParentForExternalTool(parent) {
 }
 /** Restore PFA Jar after an external tool session ends. */
 function restoreParentAfterExternalTool(parent) {
-    const focusParent = () => {
-        try {
-            if (parent && !parent.isDestroyed()) {
-                if (parent.isMinimized()) {
-                    parent.restore();
-                }
-                parent.show();
-                parent.focus();
+    try {
+        if (parent && !parent.isDestroyed()) {
+            if (parent.isMinimized()) {
+                parent.restore();
             }
+            parent.show();
+            parent.focus();
         }
-        catch (_e) {
-            // best effort
-        }
-    };
-    focusParent();
-    // Native Qt/Napari window teardown can finish just after its child process
-    // exits. Repeat on Electron's next turn so the PFA Jar window retains
-    // focus after the external viewer actually disappears.
-    setTimeout(focusParent, 0);
+    }
+    catch (_e) {
+        // best effort
+    }
 }
 function directoryDialogOptions(tag, defaultPath, multi) {
     const props = multi
@@ -1777,20 +1770,36 @@ ipcMain.on("runIndexMetadata", function (event, data) {
         } }));
     void job.wait().then(() => {
         const map = {};
+        const errors = {};
         try {
             const parsed = JSON.parse(lines.join("\n") || "[]");
             if (Array.isArray(parsed)) {
                 for (const row of parsed) {
                     if (row && row.path) {
                         map[row.path] = row.metadata || {};
+                        if (row.metadata && row.metadata.error) {
+                            errors[row.path] = String(row.metadata.error);
+                        }
                     }
                 }
             }
         }
         catch (_err) {
-            // empty map
+            console.log("LOG: index_metadata_parse_failed req=" + reqId + " paths=" + paths.length);
         }
-        event.sender.send("indexMetadataResult", { reqId, map });
+        const failed = Object.keys(errors);
+        if (failed.length) {
+            console.log("LOG: index_metadata_failed req=" + reqId + " paths=" + failed.join(",") + " errors=" + JSON.stringify(errors));
+        }
+        event.sender.send("indexMetadataResult", { reqId, map, errors });
+    }).catch((err) => {
+        const message = err && err.message ? err.message : String(err || "metadata worker failed");
+        const errors = {};
+        for (const sourcePath of paths) {
+            errors[sourcePath] = message;
+        }
+        console.log("LOG: index_metadata_worker_failed req=" + reqId + " paths=" + paths.join(",") + " error=" + message);
+        event.sender.send("indexMetadataResult", { reqId, map: {}, errors });
     });
 });
 // Max Projection
@@ -1845,10 +1854,10 @@ ipcMain.on("runAdjust", function (event, data) {
     appendFlagPathArg(adjustArgs, "-s", structPath);
     appendFlagPathArg(adjustArgs, "-a", data[1]);
     appendSliceListArg(adjustArgs, data, 2);
-    const adjustParent = dialogParentWindow(event);
     try {
-        if (adjustParent && !adjustParent.isDestroyed()) {
-            adjustParent.blur();
+        const parent = dialogParentWindow(event);
+        if (parent && !parent.isDestroyed()) {
+            parent.blur();
         }
     }
     catch (_e) {
@@ -1893,7 +1902,6 @@ ipcMain.on("runAdjust", function (event, data) {
         if (pyFail) {
             event.sender.send("adjustError", [pyFail]);
         }
-        restoreParentAfterExternalTool(adjustParent);
         ipcMain.removeAllListeners("killAdjust");
         ipcMain.removeAllListeners("saveAndExitAdjust");
     };
@@ -2046,14 +2054,9 @@ ipcMain.on("runAlign", function (event, data) {
         if (!cancelled && alignResultSummary) {
             payload.summary = alignResultSummary;
         }
+        event.sender.send("alignResult", payload);
         if (pyFail) {
             event.sender.send("alignError", [pyFail]);
-        }
-        else {
-            // A failed Python process must not first be rendered as a
-            // successful alignment.  The Align page treats alignResult as a
-            // completed run and shows “Alignment finished.” immediately.
-            event.sender.send("alignResult", payload);
         }
         restoreParentAfterExternalTool(alignParent);
         ipcMain.removeAllListeners("killAlign");
@@ -2319,13 +2322,12 @@ ipcMain.on("runCount", function (event, data) {
                 const pyFail = (0, python_job_1.describePythonShellFailure)(err, code, signal);
                 if (pyFail) {
                     reportPythonFailure(pyFail);
-                    event.sender.send("countError", [pyFail]);
                 }
                 else {
                     console.log("The exit code was: " + code);
                     console.log("The exit signal was: " + signal);
-                    event.sender.send("countResult");
                 }
+                event.sender.send("countResult");
             });
         }
         else {
@@ -2533,6 +2535,9 @@ function spawnPreprocessBatch(event, scriptName, args, resultChannel, killChanne
     pyshell.on("message", (message) => {
         if (message.startsWith("PREVIEW_JSON:")) {
             return;
+        }
+        if (scriptName === "sharpen.py" && message.startsWith("LOG:")) {
+            console.log(message);
         }
         if (message.includes("SHARPEN_NO_OUTPUT") ||
             message.includes("TOPHAT_NO_OUTPUT") ||

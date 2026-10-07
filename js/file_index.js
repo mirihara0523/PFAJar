@@ -6,7 +6,7 @@ var { ipcRenderer } = require("electron");
 var homeDir = require("./home_dir");
 var pipelineRuns = require("./pipeline_runs");
 
-var FILE_INDEX_VERSION = 1;
+var FILE_INDEX_VERSION = 2;
 var MANIFEST_V2 = 2;
 
 var SCAN_ROLES = [
@@ -59,8 +59,7 @@ function sliceIdFromFilename(filename) {
 	if (stem.toLowerCase().endsWith(".ome")) {
 		stem = path.parse(stem).name;
 	}
-	var dot = stem.indexOf(".");
-	return dot >= 0 ? stem.slice(0, dot) : stem;
+	return stem;
 }
 
 function sliceStemFromPredictionPklBasename(basename) {

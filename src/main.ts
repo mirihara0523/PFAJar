@@ -2963,6 +2963,9 @@ function spawnPreprocessBatch(
     if (message.startsWith("PREVIEW_JSON:")) {
       return;
     }
+    if (scriptName === "sharpen.py" && message.startsWith("LOG:")) {
+      console.log(message);
+    }
     if (
       message.includes("SHARPEN_NO_OUTPUT") ||
       message.includes("TOPHAT_NO_OUTPUT") ||

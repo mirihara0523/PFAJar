@@ -30,7 +30,12 @@ def belljar_process_file_core(
     if equalize:
         clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
         work = clahe.apply(work)
-        work = sharpen.enhance_contrast(work)
+        # Independent legacy reference, including percentile interpolation.
+        q = 0.05 / 100
+        clipped = np.clip(work.ravel(), np.percentile(work, q), np.percentile(work, 100 - q))
+        info = np.iinfo(work.dtype)
+        work = np.interp(clipped, (clipped.min(), clipped.max()),
+                         (info.min, info.max)).reshape(work.shape).astype(work.dtype)
     original_dtype = work.dtype
     work = unsharp_mask(work, radius=radius, amount=amount, preserve_range=True)
     work = white_tophat(work, disk(15))
@@ -45,7 +50,7 @@ def test_sharpen_belljar_core_matches_golden_uint8(equalize: bool) -> None:
     golden = belljar_process_file_core(img, radius, amount, equalize)
     mason = sharpen.sharpen_image_belljar(img, radius, amount, equalize)
     assert golden.dtype == mason.dtype
-    np.testing.assert_array_equal(golden, mason)
+    np.testing.assert_allclose(golden.astype(np.int32), mason.astype(np.int32), rtol=0, atol=1)
 
 
 @pytest.mark.parametrize("equalize", [False, True])
@@ -56,7 +61,7 @@ def test_sharpen_belljar_core_matches_golden_uint16(equalize: bool) -> None:
     golden = belljar_process_file_core(img, radius, amount, equalize)
     mason = sharpen.sharpen_image_belljar(img, radius, amount, equalize)
     assert golden.dtype == mason.dtype
-    np.testing.assert_array_equal(golden, mason)
+    np.testing.assert_allclose(golden.astype(np.int32), mason.astype(np.int32), rtol=0, atol=1)
 
 
 def test_tiled_matches_full_frame_no_equalize(monkeypatch) -> None:
@@ -93,3 +98,62 @@ def test_uint16_equalize_output_dtype() -> None:
     img = (np.ones((32, 32), dtype=np.uint16) * 10000).astype(np.uint16)
     out = sharpen.sharpen_image(img, radius=2.0, amount=1.0, equalize=True)
     assert out.dtype == np.uint16
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
+@pytest.mark.parametrize("equalize", [False, True])
+@pytest.mark.parametrize("shape", [(1, 1), (7, 13), (97, 111)])
+def test_amount_zero_exact_parity(dtype, equalize, shape) -> None:
+    rng = np.random.default_rng(2026)
+    img = rng.integers(0, np.iinfo(dtype).max + 1, shape, dtype=dtype)
+    golden = belljar_process_file_core(img, 5, 0, equalize)
+    actual = sharpen.sharpen_image_belljar(img, 5, 0, equalize)
+    np.testing.assert_array_equal(actual, golden)
+
+
+def test_amount_zero_tiled_exact_parity(monkeypatch) -> None:
+    img = np.random.default_rng(3).integers(0, 256, (135, 149), dtype=np.uint8)
+    golden = belljar_process_file_core(img, 5, 0, False)
+    monkeypatch.setattr(sharpen, "TILED_SHARPEN_PIXEL_THRESHOLD", 1)
+    monkeypatch.setattr(sharpen, "TILED_SHARPEN_TILE", 64)
+    np.testing.assert_array_equal(sharpen.sharpen_image(img, 5, 0, False), golden)
+
+
+@pytest.mark.parametrize("size", [1, 4095, 4096, 1048601])
+@pytest.mark.parametrize("kind", ["random", "constant", "sparse"])
+def test_uint8_contrast_lut_exact_legacy(size, kind):
+    img = np.random.default_rng(8).integers(0, 256, size, dtype=np.uint8)
+    if kind == "constant":
+        img[:] = 37
+    elif kind == "sparse":
+        img[:] = 0
+        img[-1] = 255
+    q = 0.05 / 100
+    clipped = np.clip(img, np.percentile(img, q), np.percentile(img, 100 - q))
+    expected = np.interp(clipped, (clipped.min(), clipped.max()), (0, 255)).astype(np.uint8)
+    np.testing.assert_array_equal(sharpen.enhance_contrast(img), expected)
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
+@pytest.mark.parametrize("equalize", [False, True])
+def test_default_float32_tolerance_and_tiled_path(dtype, equalize, monkeypatch) -> None:
+    img = np.random.default_rng(2026).integers(0, np.iinfo(dtype).max + 1, (97, 111), dtype=dtype)
+    golden = belljar_process_file_core(img, 3, 2, equalize)
+    full = sharpen.sharpen_image(img, 3, 2, equalize)
+    assert full.dtype == img.dtype
+    np.testing.assert_allclose(full.astype(np.int32), golden.astype(np.int32), rtol=0, atol=1)
+    monkeypatch.setattr(sharpen, "TILED_SHARPEN_PIXEL_THRESHOLD", 1)
+    monkeypatch.setattr(sharpen, "TILED_SHARPEN_TILE", 64)
+    tiled = sharpen.sharpen_image(img, 3, 2, equalize)
+    # Compare against the legacy tiled pipeline with the same padding, rather
+    # than conflating existing tile/full boundary differences with float32.
+    work = sharpen._apply_equalize_belljar(img) if equalize else img
+    legacy_tiled = np.empty_like(img)
+    for y in range(0, img.shape[0], 64):
+        for x in range(0, img.shape[1], 64):
+            ye, xe = min(img.shape[0], y + 64), min(img.shape[1], x + 64)
+            cy, cx = max(0, y - 32), max(0, x - 32)
+            crop = work[cy:min(img.shape[0], ye + 32), cx:min(img.shape[1], xe + 32)]
+            ref = belljar_process_file_core(crop, 3, 2, False)
+            legacy_tiled[y:ye, x:xe] = ref[y-cy:y-cy+ye-y, x-cx:x-cx+xe-x]
+    np.testing.assert_allclose(tiled.astype(np.int32), legacy_tiled.astype(np.int32), rtol=0, atol=1)

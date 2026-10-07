@@ -190,6 +190,7 @@ var DEFAULT_PARAMS = {
 		radius: 1,
 		amount: 1,
 		equalize: false,
+		workers: 2,
 		signalDatasetKind: "max",
 	},
 	tophat: {

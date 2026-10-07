@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pipeline_io_bootstrap  # noqa: F401
+import perf_log
 import argparse
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import traceback
 from pathlib import Path
@@ -22,6 +24,7 @@ from grayscale_load import load_grayscale_uint8, load_grayscale_uint8_roi, read_
 TILED_SHARPEN_PIXEL_THRESHOLD = 50_000_000
 TILED_SHARPEN_TILE = 4096
 TILED_SHARPEN_PAD = 32
+TILED_SHARPEN_WORKERS = 2
 TOPHAT_DISK_RADIUS = 15
 # Benchmark-derived static guard (~500 MP at ~20 ms/Mpix load+equalize ≈ 10 s cold NAS).
 PREVIEW_EQUALIZE_MAX_PIXELS = 500_000_000
@@ -36,6 +39,27 @@ def _sharpen_debug_enabled() -> bool:
 
 
 def _image_stats(arr: np.ndarray) -> dict[str, float | int | str]:
+    arr = np.asarray(arr)
+    if arr.size and arr.dtype in (np.dtype("uint8"), np.dtype("uint16")):
+        # Exact linear percentiles from integer counts, without a full-frame
+        # float64 copy or percentile partition buffers. Limit temporary casts.
+        counts = np.zeros(np.iinfo(arr.dtype).max + 1, dtype=np.int64)
+        flat = arr.ravel()
+        for start in range(0, flat.size, 1_048_576):
+            counts += np.bincount(flat[start:start + 1_048_576], minlength=counts.size)
+        cumulative = np.cumsum(counts)
+        occupied = np.flatnonzero(counts)
+        def percentile(q):
+            rank = (flat.size - 1) * (q / 100.0)
+            low = int(np.floor(rank))
+            high = int(np.ceil(rank))
+            a = int(np.searchsorted(cumulative, low, side="right"))
+            b = int(np.searchsorted(cumulative, high, side="right"))
+            fraction = rank - low
+            return float(b - (b - a) * (1 - fraction) if fraction >= 0.5
+                         else a + (b - a) * fraction)
+        return {"dtype": str(arr.dtype), "min": float(occupied[0]),
+                "max": float(occupied[-1]), "p50": percentile(50), "p95": percentile(95)}
     flat = np.asarray(arr).astype(np.float64).ravel()
     if flat.size == 0:
         return {"dtype": str(arr.dtype), "min": 0, "max": 0, "p50": 0, "p95": 0}
@@ -56,6 +80,8 @@ def _log_debug(prefix: str, **fields: object) -> None:
 
 
 def enhance_contrast(image, saturation_level=0.05):
+    if image.dtype == np.uint8 and image.size >= 4096:
+        return _enhance_contrast_uint8_lut(image, saturation_level)
     saturation_point = saturation_level / 100
     flat_image = image.ravel()
     low_saturation_value = np.percentile(flat_image, saturation_point)
@@ -74,11 +100,37 @@ def enhance_contrast(image, saturation_level=0.05):
     return enhanced_image.astype(image.dtype)
 
 
+def _enhance_contrast_uint8_lut(image, saturation_level):
+    """Exact legacy percentile/interpolation semantics for validated uint8."""
+    flat = image.ravel()
+    counts = np.zeros(256, dtype=np.int64)
+    for start in range(0, flat.size, 1_048_576):
+        counts += np.bincount(flat[start:start + 1_048_576], minlength=256)
+    cumulative = np.cumsum(counts)
+    def percentile(q):
+        rank = (flat.size - 1) * (q / 100.0)
+        lower, upper = int(np.floor(rank)), int(np.ceil(rank))
+        a = int(np.searchsorted(cumulative, lower, side="right"))
+        b = int(np.searchsorted(cumulative, upper, side="right"))
+        fraction = rank - lower
+        return b - (b - a) * (1 - fraction) if fraction >= 0.5 else a + (b - a) * fraction
+    q = saturation_level / 100
+    low, high = percentile(q), percentile(100 - q)
+    occupied = np.flatnonzero(counts)
+    clipped_min = np.clip(float(occupied[0]), low, high)
+    clipped_max = np.clip(float(occupied[-1]), low, high)
+    values = np.clip(np.arange(256, dtype=np.float64), low, high)
+    lut = np.interp(values, (clipped_min, clipped_max), (0, 255)).astype(np.uint8)
+    return lut[image]
+
+
 def _apply_equalize_belljar(img: np.ndarray) -> np.ndarray:
     """Bell Jar equalize: CLAHE on native dtype, then percentile contrast."""
     clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
-    work = clahe.apply(np.asarray(img))
-    return enhance_contrast(work)
+    with perf_log.perf_section("sharpen.equalize.clahe"):
+        work = clahe.apply(np.asarray(img))
+    with perf_log.perf_section("sharpen.equalize.contrast"):
+        return enhance_contrast(work)
 
 
 def _sharpen_unsharp_tophat(
@@ -89,8 +141,36 @@ def _sharpen_unsharp_tophat(
 ) -> np.ndarray:
     work = np.asarray(img)
     original_dtype = work.dtype
-    work = unsharp_mask(work, radius=radius, amount=amount, preserve_range=True)
-    work = white_tophat(work, disk(tophat_radius))
+    # At amount=0 unsharp_mask is the identity. Keep integer precision and
+    # the identical disk/reflected boundary instead of allocating float64.
+    if amount == 0 and original_dtype in (np.dtype("uint8"), np.dtype("uint16")):
+        with perf_log.perf_section("sharpen.filter.white_tophat.amount0_integer"):
+            return cv2.morphologyEx(
+                work, cv2.MORPH_TOPHAT, disk(tophat_radius),
+                borderType=cv2.BORDER_REFLECT,
+            )
+    # Validated for the default Radius 3 / Amount 2, with/without equalize.
+    # Preserve the disk and reflected boundary; accepted output tolerance is 1.
+    if radius == 3 and amount == 2 and original_dtype in (np.dtype("uint8"), np.dtype("uint16")):
+        with perf_log.perf_section("sharpen.filter.unsharp.gaussian_float32"):
+            work = work.astype(np.float32)
+            # Match scipy/skimage Gaussian truncate=4 and reflected borders.
+            size = 2 * int(4 * radius + 0.5) + 1
+            blurred = cv2.GaussianBlur(
+                work, (size, size), radius, sigmaY=radius,
+                borderType=cv2.BORDER_REFLECT,
+            )
+            work = work + amount * (work - blurred)
+        with perf_log.perf_section("sharpen.filter.white_tophat.float32"):
+            work = cv2.morphologyEx(
+                work.astype(np.float32), cv2.MORPH_TOPHAT, disk(tophat_radius),
+                borderType=cv2.BORDER_REFLECT,
+            )
+        return work.astype(original_dtype)
+    with perf_log.perf_section("sharpen.filter.unsharp"):
+        work = unsharp_mask(work, radius=radius, amount=amount, preserve_range=True)
+    with perf_log.perf_section("sharpen.filter.white_tophat"):
+        work = white_tophat(work, disk(tophat_radius))
     return work.astype(original_dtype)
 
 
@@ -131,6 +211,7 @@ def _sharpen_image_tiled(
     radius: float,
     amount: float,
     equalize: bool,
+    workers: int = TILED_SHARPEN_WORKERS,
 ) -> np.ndarray:
     """Tile unsharp+tophat only. Equalize runs once on the full frame (Bell Jar semantics)."""
     work = np.asarray(img)
@@ -152,30 +233,43 @@ def _sharpen_image_tiled(
         flush=True,
     )
 
+    jobs = []
     for y0 in range(0, h, tile):
         for x0 in range(0, w, tile):
             ye = min(h, y0 + tile)
             xe = min(w, x0 + tile)
-            cy0 = max(0, y0 - pad)
-            cx0 = max(0, x0 - pad)
-            cy1 = min(h, ye + pad)
-            cx1 = min(w, xe + pad)
-            crop = work[cy0:cy1, cx0:cx1]
-            proc = _sharpen_unsharp_tophat(crop, radius, amount)
-            oy, ox = y0 - cy0, x0 - cx0
-            th, tw = ye - y0, xe - x0
-            out[y0:ye, x0:xe] = proc[oy : oy + th, ox : ox + tw]
-            tiles_done += 1
-            if tiles_done == 1 or tiles_done == tiles_total or tiles_done % 4 == 0:
-                print(
-                    f"LOG: sharpen_tiled progress {tiles_done}/{tiles_total}",
-                    flush=True,
-                )
+            jobs.append((y0, x0, ye, xe))
+
+    def process_tile(bounds):
+        y0, x0, ye, xe = bounds
+        cy0 = max(0, y0 - pad)
+        cx0 = max(0, x0 - pad)
+        cy1 = min(h, ye + pad)
+        cx1 = min(w, xe + pad)
+        proc = _sharpen_unsharp_tophat(work[cy0:cy1, cx0:cx1], radius, amount)
+        oy, ox = y0 - cy0, x0 - cx0
+        return bounds, proc[oy : oy + ye - y0, ox : ox + xe - x0]
+
+    workers = max(1, min(4, int(workers)))
+    print(f"LOG: sharpen_tiled workers={workers} tiles={tiles_total}", flush=True)
+    with perf_log.perf_section("sharpen.filter.tiled_parallel"):
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for (y0, x0, ye, xe), proc in pool.map(process_tile, jobs):
+                out[y0:ye, x0:xe] = proc
+                tiles_done += 1
+                if tiles_done == 1 or tiles_done == tiles_total or tiles_done % 4 == 0:
+                    print(
+                        f"LOG: sharpen_tiled progress {tiles_done}/{tiles_total}",
+                        flush=True,
+                    )
 
     return out
 
 
-def sharpen_image(img: np.ndarray, radius: float, amount: float, equalize: bool) -> np.ndarray:
+def sharpen_image(
+    img: np.ndarray, radius: float, amount: float, equalize: bool,
+    workers: int = TILED_SHARPEN_WORKERS,
+) -> np.ndarray:
     if img.ndim != 2:
         raise ValueError(f"expected 2D image, got ndim={img.ndim}")
     use_tiled = img.size > TILED_SHARPEN_PIXEL_THRESHOLD
@@ -191,7 +285,7 @@ def sharpen_image(img: np.ndarray, radius: float, amount: float, equalize: bool)
     )
     if use_tiled:
         print(f"LOG: sharpen_mode=tiled pixels={img.size}", flush=True)
-        return _sharpen_image_tiled(img, radius, amount, equalize)
+        return _sharpen_image_tiled(img, radius, amount, equalize, workers)
     print(f"LOG: sharpen_mode=full pixels={img.size}", flush=True)
     return sharpen_image_belljar(img, radius, amount, equalize)
 
@@ -237,7 +331,8 @@ def run_preview(args) -> int:
     want_equalize = bool(args.equalize)
     pad = 32
     try:
-        img_h, img_w = read_image_size(path)
+        with perf_log.perf_section("sharpen.preview.read_dimensions"):
+            img_h, img_w = read_image_size(path)
     except Exception as exc:
         emit_preview_json({"ok": False, "error": str(exc)})
         return 1
@@ -255,10 +350,20 @@ def run_preview(args) -> int:
         equalize_skipped = True
         equalize_skip_reason = "slide_too_large"
 
+    if perf_log.perf_enabled():
+        print("LOG: sharpen_preview_request " + json.dumps({
+            "source": str(path), "full_width": img_w, "full_height": img_h,
+            "roi": [x, y, w, h], "roi_pixels": w * h,
+            "radius": radius, "amount": amount,
+            "equalize_requested": want_equalize, "equalize_applied": run_equalize,
+            "equalize_skip_reason": equalize_skip_reason,
+        }), flush=True)
+
     try:
         if run_equalize:
             emit_preview_progress(10, "Loading slice for equalize...")
-            full_uint8 = load_grayscale_uint8(path)
+            with perf_log.perf_section("sharpen.preview.read_full"):
+                full_uint8 = load_grayscale_uint8(path)
             _log_debug(
                 "sharpen_preview",
                 source_path=str(path.resolve()),
@@ -281,7 +386,8 @@ def run_preview(args) -> int:
             roi = filtered[oy : oy + h, ox : ox + w]
         else:
             emit_preview_progress(5, "Reading ROI...")
-            crop, _, _, x0, y0 = load_grayscale_uint8_roi(path, x, y, w, h, pad=pad)
+            with perf_log.perf_section("sharpen.preview.read_roi"):
+                crop, _, _, x0, y0 = load_grayscale_uint8_roi(path, x, y, w, h, pad=pad)
             _log_debug(
                 "sharpen_preview",
                 source_path=str(path.resolve()),
@@ -295,12 +401,15 @@ def run_preview(args) -> int:
         emit_preview_json({"ok": False, "error": str(exc)})
         return 1
 
-    roi = preview_display_sharpen(roi)
+    with perf_log.perf_section("sharpen.preview.convert_display"):
+        roi = preview_display_sharpen(roi)
     emit_preview_progress(85, "Writing preview...")
     out_dir = Path(args.preview_dir.strip()) if args.preview_dir else path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "_sharpen_preview.png"
-    cv2.imwrite(str(out_path), roi)
+    with perf_log.perf_section("sharpen.preview.write_png"):
+        cv2.imwrite(str(out_path), roi)
+    perf_log.perf_memory("sharpen.preview.complete")
     emit_preview_progress(100, "Done")
     payload: dict = {
         "ok": True,
@@ -328,6 +437,7 @@ def run_batch(args) -> int:
         amount = float(cfg.get("amount", 2))
         radius = float(cfg.get("radius", 3))
         equalize = bool(cfg.get("equalize", True))
+        workers = int(cfg.get("workers", TILED_SHARPEN_WORKERS) or TILED_SHARPEN_WORKERS)
         slice_list = cfg.get("slice_list") or args.slice_list
         signal_branch = cfg.get("signal_branch", "")
         source_run_rel = cfg.get("source_run_rel", "")
@@ -338,6 +448,7 @@ def run_batch(args) -> int:
         amount = float(args.amount.strip())
         radius = float(args.radius.strip())
         equalize = bool(args.equalize)
+        workers = int(args.workers)
         slice_list = args.slice_list
         signal_branch = ""
         source_run_rel = ""
@@ -354,10 +465,12 @@ def run_batch(args) -> int:
     for fpath in input_files:
         print(f"LOG: Processing {fpath.name}", flush=True)
         try:
-            raw = tiff.imread(str(fpath))
+            with perf_log.perf_section("sharpen.batch.read"):
+                raw = tiff.imread(str(fpath))
             if raw.ndim > 2:
                 raw = np.max(raw, axis=0)
-            stats_in = _image_stats(raw)
+            with perf_log.perf_section("sharpen.batch.input_stats"):
+                stats_in = _image_stats(raw)
             print(
                 "LOG: sharpen_input "
                 f"path={fpath.name} dtype={stats_in['dtype']} shape={tuple(raw.shape)} "
@@ -365,10 +478,12 @@ def run_batch(args) -> int:
                 f"p50={stats_in['p50']:.1f} p95={stats_in['p95']:.1f}",
                 flush=True,
             )
-            out = sharpen_image(raw, radius, amount, equalize)
-            stats_out = _image_stats(out)
+            out = sharpen_image(raw, radius, amount, equalize, workers)
+            with perf_log.perf_section("sharpen.batch.output_stats"):
+                stats_out = _image_stats(out)
             out_path = output_path / fpath.name
-            tiff.imwrite(str(out_path), out)
+            with perf_log.perf_section("sharpen.batch.write_tiff"):
+                tiff.imwrite(str(out_path), out)
             written.append(fpath.name)
             print(
                 "LOG: sharpen_output "
@@ -424,6 +539,8 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--radius", default="3")
     parser.add_argument("-a", "--amount", default="2")
     parser.add_argument("-e", "--equalize", action="store_true", help="equalize histogram")
+    parser.add_argument("--workers", default=str(TILED_SHARPEN_WORKERS), choices=("1", "2", "4"),
+                        help="tiled filter workers")
     parser.add_argument("-j", "--config", default="")
     parser.add_argument("--slice-list", default="")
     parser.add_argument("--preview", action="store_true")

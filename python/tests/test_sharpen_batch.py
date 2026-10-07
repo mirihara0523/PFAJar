@@ -19,6 +19,17 @@ pytest.importorskip("cv2")
 import sharpen  # noqa: E402
 
 
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
+@pytest.mark.parametrize("size", [1, 2, 20, 101, 1048601])
+def test_integer_stats_match_numpy_linear_percentiles(dtype, size):
+    arr = np.random.default_rng(2026).integers(0, np.iinfo(dtype).max + 1, size, dtype=dtype)
+    stats = sharpen._image_stats(arr)
+    assert stats["min"] == float(arr.min())
+    assert stats["max"] == float(arr.max())
+    assert stats["p50"] == float(np.percentile(arr.astype(np.float64), 50))
+    assert stats["p95"] == float(np.percentile(arr.astype(np.float64), 95))
+
+
 def _batch_args(input_dir: Path, output_dir: Path, **overrides) -> argparse.Namespace:
     defaults = {
         "config": "",

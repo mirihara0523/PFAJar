@@ -234,8 +234,7 @@ function listImageSliceStems(dirPath) {
 			if (/\.ome$/i.test(stem)) {
 				stem = path.parse(stem).name;
 			}
-			var dot = stem.indexOf(".");
-			stems.push(dot >= 0 ? stem.slice(0, dot) : stem);
+			stems.push(stem);
 		}
 	}
 	stems.sort();
@@ -275,18 +274,16 @@ function listImageSliceFiles(dirPath) {
 	return out;
 }
 
-// Stable dual identity for dotted acquisition filenames. Existing callers keep
-// using the short logical slice ID; new consumers can use filenameStem for
-// exact file and sidecar matching without changing legacy project keys.
+// Slice records preserve the complete filename stem. This is required for
+// distinct acquisitions whose names share a prefix before their first dot.
 function listImageSliceRecords(dirPath) {
 	return listImageSliceFiles(dirPath).map(function (entry) {
 		var stem = path.parse(entry.name).name;
 		if (/\.ome$/i.test(stem)) stem = path.parse(stem).name;
-		var dot = stem.indexOf(".");
 		return {
 			name: entry.name,
 			abs: entry.abs,
-			sliceId: dot >= 0 ? stem.slice(0, dot) : stem,
+			sliceId: stem,
 			filenameStem: stem,
 		};
 	});

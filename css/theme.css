@@ -673,8 +673,11 @@ body.project-index-busy .project-index-busy-overlay * {
 .preprocess-preview-pane {
 	position: relative;
 	overflow: hidden;
-	min-height: 20rem;
-	max-height: 28rem;
+	/* JS matches the actual adjacent Tune-controls column height. Keep a
+	 * sensible first-paint height before that measurement is available. */
+	height: 20rem;
+	min-height: 0;
+	max-height: none;
 	background: #1a1a1a;
 }
 
