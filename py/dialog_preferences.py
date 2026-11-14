@@ -1,4 +1,4 @@
-"""App-wide dialog suppression preferences under ~/.masonjar/dialog_preferences.json."""
+"""App-wide dialog suppression preferences under ~/.pfajar/dialog_preferences.json."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ KNOWN_KEYS = (
 
 
 def mason_home_dir() -> Path:
-    return Path.home() / ".masonjar"
+    return Path.home() / ".pfajar"
 
 
 def dialog_preferences_path(home: Path | None = None) -> Path:

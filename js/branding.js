@@ -4,7 +4,7 @@
 module.exports = {
 	PRODUCT_NAME: "PFA Jar",
 	LEGACY_PRODUCT_NAME: "Bell Jar",
-	HOME_DIR: ".masonjar",
+	HOME_DIR: ".pfajar",
 	LEGACY_HOME_DIR: ".belljar",
 	LOG_FILE: "masonjar.log",
 	LEGACY_LOG_FILE: "belljar.log",

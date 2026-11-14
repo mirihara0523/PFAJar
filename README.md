@@ -10,7 +10,7 @@ PFA Jar is a fork of [Mason Jar](https://github.com/matsojr22/masonjar) for neur
 
 # Compatibility
 
-Legacy Bell Jar project bundles (`*.belljar`, `project.belljar`, and `.belljar/` metadata) open without conversion. PFA Jar stores its app environment under `~/.masonjar`; Bell Jar continues to use `~/.belljar`. On first launch, if only `~/.belljar` has an environment, PFA Jar offers to copy it into `~/.masonjar` or install a fresh environment.
+Legacy Bell Jar project bundles (`*.belljar`, `project.belljar`, and `.belljar/` metadata) open without conversion. PFA Jar stores its application environment under `~/.pfajar`, separate from Mason Jar's `~/.masonjar` and Bell Jar's `~/.belljar`. On first launch, existing model/atlas data can be copied into `~/.pfajar`; Python and its virtual environment are always installed independently. Project metadata directories and file formats remain unchanged.
 
 # Usage
 
@@ -42,7 +42,7 @@ yarn compile
 yarn start
 ```
 
-First launch into a new `~/.masonjar` downloads the required models and embeddings. If you already use Bell Jar, choose **Copy from Bell Jar** to avoid downloading them again.
+First launch into a new `~/.pfajar` installs Python and its packages. If Mason Jar or Bell Jar model/atlas data is available, choose **Copy model/atlas data** to reuse a separate copy instead of downloading it again. The original application's files are not modified. Otherwise, the required data is downloaded. Initial setup needs internet access and additional disk space.
 
 # How to work with annotations
 

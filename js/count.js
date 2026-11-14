@@ -142,17 +142,14 @@ run.addEventListener("click", function () {
 			refreshPredictionRunUi();
 		}
 		var mode = pipelineRun.getSelectedRunMode("count");
-		var plan = pipelineRun.preparePipelineRun("count", mode);
-		if (project.isActive() && !plan.toProcess.length) {
-			alert("No slices to process (subset empty or all filtered).");
-			return;
-		}
+		// Determine the stable input combination before checking existing counts.
+		var candidates = pipelineRun.preparePipelineRun("count", "overwrite", { preview: true });
 		var predRel = pipelineRuns.getActiveRunRelForRole("predictions");
 		var slicesRel = pipelineRuns.getActiveRunRelForRole("slices");
 		var slug = pipelineRuns.buildRunSlug("count", {
 			predictionRunRel: predRel,
 			slicesRunRel: slicesRel,
-			subsetCount: plan.toProcess.length,
+			subsetCount: candidates.toProcess.length,
 		});
 		var useFlat = flatOutput && flatOutput.checked;
 		var finalOut = pipelineRuns.resolveStepOutputPath("count", {
@@ -160,7 +157,23 @@ run.addEventListener("click", function () {
 			flat: useFlat,
 			runMode: mode,
 			legacyOutBase: outdir.value,
+			branchOverride: "count/" + (predRel.split(/[\\/]/)[0] || "unassigned"),
 		});
+		var outputRunRel = pipelineRuns.relFromRoleBase("count", finalOut);
+		var plan = pipelineRun.preparePipelineRun("count", mode, {
+			outputRunRel: useFlat ? "" : outputRunRel,
+			sliceIds: candidates.toProcess,
+		});
+		ipc.send("perfLog", "LOG: count.plan " + JSON.stringify({
+			prediction_run: predRel, alignment_run: slicesRel, output: finalOut,
+			mode: mode, candidates: candidates.toProcess.length,
+			processing: plan.toProcess.length, skipped_existing: plan.skipped.length,
+			summary: plan.summary,
+		}));
+		if (project.isActive() && !plan.toProcess.length) {
+			alert(plan.summary || "No slices to process (subset empty or all filtered).");
+			return;
+		}
 		try {
 			fs.mkdirSync(finalOut, { recursive: true });
 		} catch (mkdirErr) {

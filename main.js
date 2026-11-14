@@ -63,6 +63,12 @@ const exec = promisify(require("child_process").exec);
 const stream = require("stream");
 const https = require("https");
 const serverFetch = require("node-fetch");
+const packageInstaller = require(path.join(__dirname, "js", "package_install"));
+// Enable detailed performance logs for normal launches and inherited Python jobs.
+// An explicit MASONJAR_PERF=0 remains available for diagnostic comparisons.
+if (process.env.MASONJAR_PERF === undefined) {
+    process.env.MASONJAR_PERF = "1";
+}
 var appDir = app.getAppPath();
 var win = null;
 var logWin = null;
@@ -93,6 +99,11 @@ const appLogSessionId = `mj-${process.pid}-${Date.now()}`;
 function flushLogUiQueue() {
     logUiFlushTimer = null;
     if (!logWin || !logWin.webContents || logUiQueue.length === 0) {
+        return;
+    }
+    // Keep startup errors queued until the new log page has IPC listeners.
+    if (typeof logWin.webContents.isLoadingMainFrame === "function" &&
+        logWin.webContents.isLoadingMainFrame()) {
         return;
     }
     try {
@@ -239,56 +250,26 @@ app.on("before-quit", () => {
 });
 const BRANDING = {
     PRODUCT_NAME: "PFA Jar",
-    HOME_DIR: ".masonjar",
+    HOME_DIR: ".pfajar",
     LEGACY_HOME_DIR: ".belljar",
     LOG_FILE: "masonjar.log",
     GITHUB_REPO: "mirihara0523/PFAJar",
 };
-const LEGACY_HOME_COPY_ENTRIES = [
-    "python",
-    "benv",
-    "models",
-    "embeddings",
-    "nrrd",
-    "manifest.json",
-];
+const runtimeHome = require(path.join(__dirname, "js", "home_dir"));
 function resolveHomeDir() {
     return path.join(app.getPath("home"), BRANDING.HOME_DIR);
 }
-function legacyHomePath() {
-    return path.join(app.getPath("home"), BRANDING.LEGACY_HOME_DIR);
-}
-function envIsReady(homePath) {
-    return (fs.existsSync(path.join(homePath, "python")) ||
-        fs.existsSync(path.join(homePath, "benv")));
-}
-function needsLegacyHomeMigration() {
-    return !envIsReady(homeDir) && envIsReady(legacyHomePath());
-}
-function copyLegacyHomeEntries(win) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const legacyDir = legacyHomePath();
-        for (const entry of LEGACY_HOME_COPY_ENTRIES) {
-            const src = path.join(legacyDir, entry);
-            if (!fs.existsSync(src)) {
-                continue;
-            }
-            const dest = path.join(homeDir, entry);
-            win.webContents.send("updateStatus", `Copying ${entry} from Bell Jar…`);
-            yield fs.promises.cp(src, dest, { recursive: true });
-        }
-    });
-}
 function maybeMigrateLegacyHome(win) {
     return __awaiter(this, void 0, void 0, function* () {
-        if (!needsLegacyHomeMigration()) {
+        if (!runtimeHome.needsLegacyHomeMigration(app.getPath("home"))) {
             return true;
         }
+        const source = runtimeHome.findResourceSource(app.getPath("home"));
         const choice = dialog.showMessageBoxSync(win, {
             type: "question",
-            message: "PFA Jar uses ~/.masonjar (separate from Bell Jar's ~/.belljar).",
-            detail: "Copy your existing Bell Jar environment to save re-downloading ~20GB, or install fresh into ~/.masonjar.",
-            buttons: ["Copy from Bell Jar", "Fresh install", "Cancel"],
+            message: "PFA Jar uses its own environment in ~/.pfajar.",
+            detail: `Existing resources were found in ${source}. Copy models and atlas data to avoid downloading them again. Python and packages will be installed fresh; the original environment stays unchanged.`,
+            buttons: ["Copy model/atlas data", "Fresh install", "Cancel"],
             defaultId: 0,
             cancelId: 2,
         });
@@ -297,11 +278,13 @@ function maybeMigrateLegacyHome(win) {
             return false;
         }
         if (choice === 1) {
-            console.log("Using new ~/.masonjar; ~/.belljar left untouched.");
+            console.log("Using fresh ~/.pfajar; other applications' environments left untouched.");
             return true;
         }
         try {
-            yield copyLegacyHomeEntries(win);
+            yield runtimeHome.copyResourceEntries(source, homeDir, (entry) => {
+                win.webContents.send("updateStatus", `Copying ${entry} to PFA Jar…`);
+            });
             return true;
         }
         catch (error) {
@@ -310,7 +293,7 @@ function maybeMigrateLegacyHome(win) {
             createLogFile(`Legacy home copy failed: ${msg}\n`);
             dialog.showMessageBoxSync(win, {
                 type: "error",
-                message: "Could not copy Bell Jar environment",
+                message: "Could not copy model/atlas data to PFA Jar",
                 detail: msg,
             });
             app.quit();
@@ -320,6 +303,7 @@ function maybeMigrateLegacyHome(win) {
 }
 // Path variables for easy management of execution
 const homeDir = resolveHomeDir();
+process.env.PFAJAR_HOME = homeDir;
 // Mod is the proper path to the python/pip binary
 var mod = process.platform === "win32" ? "python/" : "python/bin/";
 var envMod = process.platform === "win32" ? "Scripts/" : "bin/";
@@ -532,45 +516,45 @@ function createLogFile(message) {
     fs.appendFileSync(logPath, message);
 }
 // Get files asynchonously
-function downloadFile(url, target, win) {
+function downloadFile(url, target, win, redirects = 0) {
     return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(target, { highWaterMark: 64 * 1024 });
-        // get the file, update the user loading screen with text on progress
-        const progress = (receivedBytes, totalBytes) => {
-            const percentage = (receivedBytes * 100) / totalBytes;
-            if (percentage > 0) {
-                win.webContents.send("updateStatus", {
-                    message: `Downloading ${target
-                        .split("/")
-                        .pop()}... ${percentage.toFixed(0)}%`,
-                    timestamp: Date.now(),
-                });
-            }
-        };
-        const dummy = new stream.PassThrough();
         const request = https.get(url, (response) => {
-            // create a dummy stream so we can update the user on progress
-            var receivedBytes = 0;
-            var totalBytes = parseInt(response.headers["content-length"]);
-            response.pipe(dummy);
-            let lastUpdateTimestamp = Date.now();
-            dummy.on("data", (chunk) => {
-                receivedBytes += chunk.length;
-                const currentTimestamp = Date.now();
-                if (currentTimestamp - lastUpdateTimestamp >= 1000) {
-                    // 1000 ms = 1 second
-                    progress(receivedBytes, totalBytes);
-                    lastUpdateTimestamp = currentTimestamp;
+            const status = response.statusCode || 0;
+            if (status >= 300 && status < 400 && response.headers.location && redirects < 5) {
+                response.resume();
+                const next = new URL(response.headers.location, url).toString();
+                downloadFile(next, target, win, redirects + 1).then(resolve, reject);
+                return;
+            }
+            if (status !== 200) {
+                response.resume();
+                reject(new Error(`Download failed: HTTP ${status} (${url})`));
+                return;
+            }
+            const file = fs.createWriteStream(target, { highWaterMark: 64 * 1024 });
+            let received = 0;
+            const total = Number(response.headers["content-length"] || 0);
+            let lastUpdate = 0;
+            response.on("data", (chunk) => {
+                received += chunk.length;
+                if (Date.now() - lastUpdate < 1000)
+                    return;
+                lastUpdate = Date.now();
+                const progress = total > 0 ? `${Math.min(100, received * 100 / total).toFixed(0)}%`
+                    : `${(received / 1048576).toFixed(1)} MiB`;
+                sendLoadingStatus(win, `Downloading ${path.basename(target)}… ${progress}`);
+            });
+            stream.pipeline(response, file, (error) => {
+                if (error)
+                    reject(error);
+                else {
+                    sendLoadingStatus(win, "Extracting downloaded files…");
+                    resolve(true);
                 }
             });
-            // pipe the response to the file
-            response.pipe(file);
-            file.on("finish", () => {
-                file.close();
-                win.webContents.send("updateStatus", `Extracting ${target.split("/").pop()}...`);
-                resolve(true);
-            });
         });
+        request.on("error", reject);
+        request.setTimeout(120000, () => request.destroy(new Error("Download timed out: " + url)));
     });
 }
 // Delete a file safely
@@ -586,358 +570,185 @@ function getVersion() {
     return packageJson.version;
 }
 function setupPython(win) {
-    const bucketParentPath = "https://storage.googleapis.com/belljar_updates";
-    const linuxURL = `${bucketParentPath}/cpython-3.10.13+20230826-x86_64-unknown-linux-gnu-install_only.tar.gz`;
-    const winURL = `${bucketParentPath}/cpython-3.10.13+20230826-x86_64-pc-windows-msvc-shared-install_only.tar.gz`;
-    const osxURL = `${bucketParentPath}/cpython-3.10.13+20230826-aarch64-apple-darwin-install_only.tar.gz`;
-    const osxIntelURL = `${bucketParentPath}/cpython-3.10.13+20230826-x86_64-apple-darwin-install_only.tar.gz`;
-    return new Promise((resolve, reject) => {
-        if (!fs.existsSync(path.join(homeDir, "python"))) {
-            win.webContents.send("updateStatus", "Settting up python...");
-            switch (process.platform) {
-                case "win32":
-                    // Download and extract python to the home directory
-                    downloadFile(winURL, path.join(homeDir, "cpython-3.10.13+20230826-x86_64-pc-windows-msvc-shared-install_only.tar.gz"), win)
-                        .then(() => {
-                        // Extract the tarball
-                        tar
-                            .x({
-                            cwd: homeDir,
-                            preservePaths: true,
-                            file: path.join(homeDir, "cpython-3.10.13+20230826-x86_64-pc-windows-msvc-shared-install_only.tar.gz"),
-                        })
-                            .then(() => {
-                            win.webContents.send("updateStatus", "Extracted python...");
-                            resolve(true);
-                        });
-                    })
-                        .catch((err) => {
-                        console.log(err);
-                    });
-                    break;
-                case "linux":
-                    downloadFile(linuxURL, path.join(homeDir, "cpython-3.10.13+20230826-x86_64-unknown-linux-gnu-install_only.tar.gz"), win).then(() => {
-                        tar
-                            .x({
-                            cwd: homeDir,
-                            preservePaths: true,
-                            file: path.join(homeDir, "cpython-3.10.13+20230826-x86_64-unknown-linux-gnu-install_only.tar.gz"),
-                        })
-                            .then(() => {
-                            win.webContents.send("updateStatus", "Extracted python...");
-                            resolve(true);
-                        });
-                    });
-                    break;
-                case "darwin":
-                    // Check if we are on intel or arm
-                    if (process.arch === "x64") {
-                        downloadFile(osxIntelURL, path.join(homeDir, "cpython-3.10.13+20230826-x86_64-apple-darwin-install_only.tar.gz"), win).then(() => {
-                            tar
-                                .x({
-                                cwd: homeDir,
-                                preservePaths: true,
-                                file: path.join(homeDir, "cpython-3.10.13+20230826-x86_64-apple-darwin-install_only.tar.gz"),
-                            })
-                                .then(() => {
-                                win.webContents.send("updateStatus", "Extracted python...");
-                                resolve(true);
-                            });
-                        });
+    return __awaiter(this, void 0, void 0, function* () {
+        const baseExe = path.join(pythonPath, pyCommand);
+        if (!fs.existsSync(baseExe)) {
+            const platformName = process.platform === "win32"
+                ? "x86_64-pc-windows-msvc-shared"
+                : process.platform === "linux" ? "x86_64-unknown-linux-gnu"
+                    : process.platform === "darwin" && process.arch === "x64"
+                        ? "x86_64-apple-darwin" : process.platform === "darwin"
+                        ? "aarch64-apple-darwin" : "";
+            if (!platformName)
+                throw new Error("Unsupported Python platform: " + process.platform);
+            const name = `cpython-3.10.13+20230826-${platformName}-install_only.tar.gz`;
+            yield installRuntimeArchive(win, "python", `https://storage.googleapis.com/belljar_updates/${name}`);
+            if (!fs.existsSync(baseExe))
+                throw new Error("Downloaded Python executable is missing: " + baseExe);
+        }
+        return !fs.existsSync(path.join(envPythonPath, pyCommand));
+    });
+}
+/** Stage extraction before replacing a PFA-owned directory. Never touches another app's home. */
+function installRuntimeArchive(win, entry, url) {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!["python", "models", "embeddings", "nrrd"].includes(entry)) {
+            throw new Error("Invalid runtime resource: " + entry);
+        }
+        const staging = yield fs.promises.mkdtemp(path.join(homeDir, ".setup-"));
+        const target = path.join(homeDir, entry);
+        const backup = path.join(staging, "previous");
+        let replaced = false;
+        let retainBackup = false;
+        try {
+            const archive = path.join(staging, "download.tar.gz");
+            yield downloadFile(url, archive, win);
+            yield tar.x({ cwd: staging, file: archive, preservePaths: false });
+            const extracted = path.join(staging, entry);
+            if (!fs.existsSync(extracted) || !fs.statSync(extracted).isDirectory() || !fs.readdirSync(extracted).length) {
+                throw new Error("Archive is missing required resource: " + entry);
+            }
+            if (fs.existsSync(target)) {
+                yield fs.promises.rename(target, backup);
+                replaced = true;
+            }
+            try {
+                yield fs.promises.rename(extracted, target);
+            }
+            catch (error) {
+                if (replaced) {
+                    try {
+                        yield fs.promises.rename(backup, target);
                     }
-                    else {
-                        downloadFile(osxURL, path.join(homeDir, "cpython-3.10.13+20230826-aarch64-apple-darwin-install_only.tar.gz"), win).then(() => {
-                            tar
-                                .x({
-                                cwd: homeDir,
-                                preservePaths: true,
-                                file: path.join(homeDir, "cpython-3.10.13+20230826-aarch64-apple-darwin-install_only.tar.gz"),
-                            })
-                                .then(() => {
-                                win.webContents.send("updateStatus", "Extracted python...");
-                                resolve(true);
-                            });
-                        });
+                    catch (restoreError) {
+                        retainBackup = true;
+                        throw new Error(`Could not restore resource. Backup preserved at ${backup}: ${String(restoreError)}`);
                     }
-                    break;
-                default:
-                    // If we don't have a supported platform, just resolve
-                    resolve(true);
-                    break;
+                }
+                throw error;
             }
         }
-        else {
-            // Double check that the environment is setup by confirming if the benv folder exists
-            if (!fs.existsSync(envPath)) {
-                resolve(true);
-            }
-            else {
-                resolve(false);
-            }
+        finally {
+            if (!retainBackup)
+                yield fs.promises.rm(staging, { recursive: true, force: true });
         }
     });
 }
-// Download the required tar files from the bucket
-function downloadResources(win, fresh) {
-    // Download the tar files into the homeDir and extract them to their respective folders
-    const currnet_versions = {
-        nrrd: "v91",
-        models: "v952",
-        embeddings: "v6",
-    };
-    return new Promise((resolve, reject) => {
-        const bucketParentPath = "https://storage.googleapis.com/belljar_updates";
-        const embeddingsLink = `${bucketParentPath}/embeddings-v6.tar.gz`;
-        const modelsLink = `${bucketParentPath}/models-v10.tar.gz`;
-        const nrrdLink = `${bucketParentPath}/nrrd-v91.tar.gz`;
-        const requiredDirs = ["models", "embeddings", "nrrd"];
-        if (!fresh) {
-            var downloading = [];
-            var total = 0;
-            // check the manifest.json and compare versions
-            // if the versions are different, delete the dir and download
-            const manifestPath = path.join(homeDir, "manifest.json");
-            // Make sure the manifest exists and if not lets make one and then delte all these dirs and redownload
-            if (!fs.existsSync(manifestPath)) {
-                // Create manifest from current versions
-                fs.writeFileSync(manifestPath, JSON.stringify(currnet_versions, null, 2));
-                // Delete existing
-                downloading.push("models");
-                downloading.push("embeddings");
-                downloading.push("nrrd");
-            }
-            const manifest = require(manifestPath);
-            // check if each directory exists and its not empty
-            for (let i = 0; i < requiredDirs.length; i++) {
-                const dir = requiredDirs[i];
-                if (!fs.existsSync(path.join(homeDir, dir)) ||
-                    fs.readdirSync(path.join(homeDir, dir)).length === 0) {
-                    // make sure we are not already downloading this dir
-                    if (downloading.indexOf(dir) === -1) {
-                        downloading.push(dir);
-                    }
-                }
-            }
-            for (const [key, value] of Object.entries(currnet_versions)) {
-                if (manifest[key] !== value) {
-                    downloading.push(key);
-                }
-            }
-            if (downloading.indexOf("models") === -1) {
-                // Check in the models dir if chaosdruid.pt exists do nothing, otherwise delete the dir and download
-                if (!fs.existsSync(path.join(homeDir, "models/chaosdruid.pt"))) {
-                    downloading.push("models");
-                    // Delete existing
-                    if (fs.existsSync(path.join(homeDir, "models"))) {
-                        fs.rm(path.join(homeDir, "models"), { recursive: true });
-                    }
-                }
-            }
-            // Delete and update manifest
-            if (downloading.length > 0) {
-                fs.writeFileSync(manifestPath, JSON.stringify(currnet_versions, null, 2));
-            }
-            downloading.reduce((promiseChain, dir, i) => {
-                return promiseChain
-                    .then(() => {
-                    win.webContents.send("updateStatus", `Redownloading ${dir}...this may take a while`);
-                    if (fs.existsSync(path.join(homeDir, dir))) {
-                        fs.rmSync(path.join(homeDir, dir), { recursive: true });
-                    }
-                    let downloadPath = "";
-                    switch (dir) {
-                        case "models":
-                            downloadPath = modelsLink;
-                            break;
-                        case "embeddings":
-                            downloadPath = embeddingsLink;
-                            break;
-                        case "nrrd":
-                            downloadPath = nrrdLink;
-                            break;
-                        default:
-                            break;
-                    }
-                    return downloadFile(downloadPath, path.join(homeDir, `${dir}.tar.gz`), win);
-                })
-                    .then(() => {
-                    return tar.x({
-                        cwd: homeDir,
-                        preservePaths: true,
-                        file: path.join(homeDir, `${dir}.tar.gz`),
-                    });
-                })
-                    .then(() => {
-                    return deleteFile(path.join(homeDir, `${dir}.tar.gz`));
-                })
-                    .then(() => {
-                    win.webContents.send("updateStatus", `Downloaded ${dir}`);
-                    total++;
-                    if (downloading.length === total) {
-                        resolve(true);
-                    }
-                });
-            }, Promise.resolve());
-            if (downloading.length === 0) {
-                resolve(true);
-            }
+function downloadResources(win, _fresh) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const versions = { nrrd: "v91", models: "v952", embeddings: "v6" };
+        const archives = {
+            models: "models-v10.tar.gz", embeddings: "embeddings-v6.tar.gz", nrrd: "nrrd-v91.tar.gz",
+        };
+        const manifestPath = path.join(homeDir, "manifest.json");
+        let manifest = {};
+        try {
+            manifest = JSON.parse(yield fs.promises.readFile(manifestPath, "utf8"));
         }
-        else {
-            // Since we are doing a fresh install, we need to ensure no remnants of the old install are left or partially downloaded
-            // Check if these directories exist, if they do, we don't need to download any files
-            let allDirsExist = true;
-            requiredDirs.forEach((dir) => {
-                if (!fs.existsSync(path.join(homeDir, dir))) {
-                    allDirsExist = false;
-                }
-            });
-            // Creat the manifest
-            fs.writeFileSync(path.join(homeDir, "manifest.json"), JSON.stringify(currnet_versions, null, 2));
-            if (!allDirsExist) {
-                // Something is missing, delete everything and download again
-                requiredDirs.forEach((dir) => {
-                    if (fs.existsSync(path.join(homeDir, dir))) {
-                        fs.rmSync(path.join(homeDir, dir), { recursive: true });
-                    }
-                });
-                // Download the embeddings
-                downloadFile(embeddingsLink, path.join(homeDir, "embeddings.tar.gz"), win).then(() => {
-                    // Extract the embeddings
-                    tar
-                        .x({
-                        cwd: homeDir,
-                        preservePaths: true,
-                        file: path.join(homeDir, "embeddings.tar.gz"),
-                    })
-                        .then(() => {
-                        // Delete the tar file
-                        deleteFile(path.join(homeDir, "embeddings.tar.gz")).then(() => {
-                            // Download the models
-                            downloadFile(modelsLink, path.join(homeDir, "models.tar.gz"), win).then(() => {
-                                // Extract the models
-                                tar
-                                    .x({
-                                    cwd: homeDir,
-                                    preservePaths: true,
-                                    file: path.join(homeDir, "models.tar.gz"),
-                                })
-                                    .then(() => {
-                                    // Delete the tar file
-                                    deleteFile(path.join(homeDir, "models.tar.gz")).then(() => {
-                                        // Download the nrrd
-                                        downloadFile(nrrdLink, path.join(homeDir, "nrrd.tar.gz"), win).then(() => {
-                                            // Extract the nrrd
-                                            tar
-                                                .x({
-                                                cwd: homeDir,
-                                                preservePaths: true,
-                                                file: path.join(homeDir, "nrrd.tar.gz"),
-                                            })
-                                                .then(() => {
-                                                // Delete the tar file
-                                                deleteFile(path.join(homeDir, "nrrd.tar.gz")).then(() => {
-                                                    resolve(true);
-                                                });
-                                            });
-                                        });
-                                    });
-                                });
-                            });
-                        });
-                    });
-                });
-            }
-            else {
-                resolve(true);
-            }
+        catch (_error) { /* Missing/corrupt manifest requires resource verification/download. */ }
+        for (const entry of ["models", "embeddings", "nrrd"]) {
+            const dest = path.join(homeDir, entry);
+            const present = fs.existsSync(dest) && fs.statSync(dest).isDirectory() && fs.readdirSync(dest).length > 0;
+            const modelPresent = entry !== "models" || fs.existsSync(path.join(dest, "chaosdruid.pt"));
+            if (present && modelPresent && manifest && manifest[entry] === versions[entry])
+                continue;
+            win.webContents.send("updateStatus", `Downloading ${entry} for PFA Jar…`);
+            yield installRuntimeArchive(win, entry, `https://storage.googleapis.com/belljar_updates/${archives[entry]}`);
+            manifest = Object.assign(Object.assign({}, (manifest || {})), { [entry]: versions[entry] });
+            // Record only completed resources; failed downloads remain retryable.
+            const temp = manifestPath + ".tmp";
+            yield fs.promises.writeFile(temp, JSON.stringify(manifest, null, 2));
+            yield fs.promises.rename(temp, manifestPath);
         }
+        return true;
     });
 }
 // Creates the venv and installs the dependencies
 function setupEnvironment(win) {
-    if (!fs.existsSync(envPath)) {
+    if (!fs.existsSync(path.join(envPythonPath, pyCommand))) {
         // We have not created the venv yet, so we probably don't have the models, etc. either
         win.webContents.send("updateStatus", "Preparing to download require files...");
-        downloadResources(win, true)
+        return downloadResources(win, true)
             .then(() => {
-            win.webContents.send("updateStatus", "Installing venv...");
-            return installVenv();
-        })
-            .then(({ stdout, stderr }) => {
-            console.log(stdout);
-            win.webContents.send("updateStatus", "Creating venv...");
+            win.webContents.send("updateStatus", "Creating PFA Jar environment…");
             return createVenv();
         })
             .then(({ stdout, stderr }) => {
             console.log(stdout);
             win.webContents.send("updateStatus", "Installing packages...");
-            return installDeps();
+            return installPackages(win, false);
         })
-            .then(({ stdout, stderr }) => {
-            console.log(stdout);
+            .then(() => {
             win.webContents.send("updateStatus", "Setup complete!");
             loadMenuAndCheckUpdates(win);
         })
             .catch((error) => {
-            console.log("An error occurred during setup:", error);
-            win.webContents.send("updateStatus", "An error occurred during setup.");
-        });
-    }
-    // Install venv package
-    function installVenv() {
-        return __awaiter(this, void 0, void 0, function* () {
-            const { stdout, stderr } = yield exec(`${pyCommand} -m pip install --user virtualenv`, { cwd: pythonPath });
-            return { stdout, stderr };
+            reportBootstrapFailure(win, error);
         });
     }
     // Create venv
     function createVenv() {
         return __awaiter(this, void 0, void 0, function* () {
-            const envDir = process.platform === "win32" ? "../benv" : "../../benv";
-            const { stdout, stderr } = yield exec(`${pyCommand} -m venv ${envDir}`, {
+            const { stdout, stderr } = yield exec(`"${path.join(pythonPath, pyCommand)}" -m venv "${envPath}"`, {
                 cwd: pythonPath,
+                env: pythonShellEnvBase(),
             });
             return { stdout, stderr };
         });
     }
-    // Install pip packages
-    function installDeps() {
-        return __awaiter(this, void 0, void 0, function* () {
-            let reqs = path.join(appDir, "py/requirements.txt");
-            const { stdout, stderr } = yield exec(`${pyCommand} -m pip install -r "${reqs}" --use-pep517`, { cwd: envPythonPath });
-            return { stdout, stderr };
-        });
-    }
+}
+function installPackages(targetWin, noCache) {
+    return packageInstaller.installRequirements({
+        pythonPath: path.join(envPythonPath, pyCommand),
+        requirementsPath: path.join(appDir, "py/requirements.txt"),
+        cwd: envPythonPath, env: pythonShellEnvBase(), noCache,
+        onEvent: (event) => {
+            if (!targetWin.isDestroyed())
+                targetWin.webContents.send("packageInstallProgress", event);
+        },
+        onLog: (line) => console.log("LOG: setup.packages " + line),
+    });
 }
 // Install the latest dependencies, could have changed after an update
 function updatePythonDependencies(win) {
-    return new Promise((resolve, reject) => {
-        win.webContents.send("updateStatus", "Updating packages...");
-        // Run pip install -r requirements.txt --no-cache-dir to update the packages
-        let reqsPath = path.join(appDir, "py/requirements.txt");
-        exec(`${pyCommand} -m pip install -r "${reqsPath}" --no-cache-dir  --use-pep517`, { cwd: envPythonPath })
-            .then(({ stdout, stderr }) => {
-            console.log(stdout);
-            win.webContents.send("updateStatus", "Update complete!");
-            resolve(true);
-        })
-            .catch((error) => {
-            console.log(error);
-            createLogFile(error);
-            createLogFile("Failed to update python dependencies");
-            createLogFile(appDir);
-            reject(error);
-        });
+    win.webContents.send("updateStatus", "Updating packages...");
+    return installPackages(win, true).then(() => {
+        win.webContents.send("updateStatus", "Update complete!");
+        return true;
     });
 }
 // Ensure all required directories exist and if not, download them
 function fixMissingDirectories(win) {
-    return new Promise((resolve, reject) => {
-        win.webContents.send("updateStatus", "Checking for updatess...");
-        downloadResources(win, false).then(() => {
-            resolve(true);
+    win.webContents.send("updateStatus", "Checking required model and atlas files…");
+    return downloadResources(win, false);
+}
+function reportBootstrapFailure(targetWin, error) {
+    let detail = error instanceof Error ? error.message : String(error);
+    const processError = error;
+    for (const output of [processError === null || processError === void 0 ? void 0 : processError.stderr, processError === null || processError === void 0 ? void 0 : processError.stdout]) {
+        const text = output == null ? "" : String(output).trim();
+        if (text && !detail.includes(text))
+            detail += "\n" + text;
+    }
+    console.log(`LOG: bootstrap_failed environment=${homeDir}\n${detail}`);
+    if (processError === null || processError === void 0 ? void 0 : processError.stack)
+        console.log(String(processError.stack));
+    sendLoadingStatus(targetWin, "Setup failed. See the error details and restart PFA Jar to retry.");
+    if (!targetWin.isDestroyed()) {
+        targetWin.webContents.send("bootstrapFailed", { detail, environment: homeDir });
+        ensureLogWindowVisible({ force: true });
+        dialog.showMessageBoxSync(targetWin, {
+            type: "error", message: "PFA Jar setup failed",
+            detail: `Environment: ${homeDir}\n\n${detail}\n\nThe log window has been opened. Setup has stopped; restart PFA Jar to retry.`,
         });
-    });
+        // Error-only focus: normal logging continues to open without stealing focus.
+        if (logWin && !logWin.isDestroyed()) {
+            if (logWin.isMinimized())
+                logWin.restore();
+            logWin.show();
+            logWin.focus();
+        }
+    }
 }
 // Makes the local user writable folder
 function checkLocalDir() {
@@ -1156,27 +967,27 @@ function beginAppBootstrap(targetWin) {
     checkLocalDir();
     (0, io_fairshare_1.ensureCoordinatorDir)(ioFairshareDir);
     void (0, io_fairshare_1.detectLinkMbps)();
-    void maybeMigrateLegacyHome(targetWin).then((ok) => {
+    return maybeMigrateLegacyHome(targetWin).then((ok) => {
         if (!ok) {
             return;
         }
-        setupPython(targetWin)
+        return setupPython(targetWin)
             .then((installed) => {
             if (installed) {
-                setupEnvironment(targetWin);
+                return setupEnvironment(targetWin);
             }
             else {
-                updatePythonDependencies(targetWin).then(() => {
-                    fixMissingDirectories(targetWin).then(() => {
+                return updatePythonDependencies(targetWin).then(() => {
+                    return fixMissingDirectories(targetWin).then(() => {
                         loadMenuAndCheckUpdates(targetWin);
                     });
                 });
             }
         })
             .catch((error) => {
-            console.log(error);
+            reportBootstrapFailure(targetWin, error);
         });
-    });
+    }).catch((error) => reportBootstrapFailure(targetWin, error));
 }
 app.on("ready", () => {
     logUiQueue = [];
@@ -1633,6 +1444,12 @@ function cleanupPythonKillListener(killChannel) {
 /** Avoid MPS hangs on ops like torchvision::nms during detection on Apple Silicon. */
 function pythonShellEnvBase() {
     const env = Object.assign({}, process.env);
+    // Do not inherit an activated Conda/other-app environment into PFA Python.
+    delete env.PYTHONHOME;
+    delete env.PYTHONPATH;
+    delete env.VIRTUAL_ENV;
+    env.PYTHONNOUSERSITE = "1";
+    env.PFAJAR_HOME = homeDir;
     if (process.platform === "darwin") {
         env.PYTORCH_ENABLE_MPS_FALLBACK = "1";
     }
@@ -1793,11 +1610,10 @@ ipcMain.on("runIndexMetadata", function (event, data) {
         }
         event.sender.send("indexMetadataResult", { reqId, map, errors });
     }).catch((err) => {
-        const message = err && err.message ? err.message : String(err || "metadata worker failed");
+        const message = err instanceof Error ? err.message : String(err || "metadata worker failed");
         const errors = {};
-        for (const sourcePath of paths) {
+        for (const sourcePath of paths)
             errors[sourcePath] = message;
-        }
         console.log("LOG: index_metadata_worker_failed req=" + reqId + " paths=" + paths.join(",") + " error=" + message);
         event.sender.send("indexMetadataResult", { reqId, map: {}, errors });
     });

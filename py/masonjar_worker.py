@@ -25,10 +25,9 @@ import time
 import traceback
 from typing import Any, Dict, Optional, TextIO
 
-# Force single-threaded torch/data loaders when scripts import them later.
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("TORCH_NUM_THREADS", "1")
+import cpu_runtime
+
+cpu_runtime.configure_cpu(log=False)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _cancel = threading.Event()
@@ -121,15 +120,7 @@ def _run_script(job_id: str, script: str, args: list, env: Optional[Dict[str, st
     )
     _perf_t0 = time.perf_counter() if _perf_on else 0.0
     try:
-        try:
-            import torch  # type: ignore
-
-            try:
-                torch.set_num_threads(1)
-            except Exception:
-                pass
-        except Exception:
-            pass
+        cpu_runtime.configure_cpu()
         runpy.run_path(script_path, run_name="__main__")
     except SystemExit as exc:
         c = exc.code

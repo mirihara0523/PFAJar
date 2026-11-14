@@ -12,7 +12,7 @@ var { spawnSync } = require("child_process");
 var helpers = require("./test-helpers");
 
 function resolveEnvPython() {
-	var homeDir = path.join(os.homedir(), ".masonjar");
+	var homeDir = path.join(os.homedir(), ".pfajar");
 	var benv = path.join(homeDir, "benv");
 	if (!fs.existsSync(benv)) {
 		return null;
@@ -63,7 +63,7 @@ function main() {
 	var python = resolveEnvPython();
 	if (!python || !fs.existsSync(python)) {
 		console.log(
-			"test-dapi-cleanup.js: SKIP (no ~/.masonjar/benv — run PFA Jar once to bootstrap)",
+			"test-dapi-cleanup.js: SKIP (no ~/.pfajar/benv — run PFA Jar once to bootstrap)",
 		);
 		return;
 	}

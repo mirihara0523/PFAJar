@@ -213,6 +213,33 @@ function testDottedSliceIdsSurviveDetectionAndCountPlan() {
 
 	var result = pipelineRun.preparePipelineRun("count", "overwrite");
 	assert.deepStrictEqual(result.toProcess, [dotted]);
+	var quantBase = path.join(bundle, project.CANONICAL_ROLES.quantification);
+	var oldCount = path.join(quantBase, "count/starters/old_combination");
+	fs.mkdirSync(oldCount, { recursive: true });
+	fs.writeFileSync(path.join(oldCount, "count_results.csv"), "existing starters");
+	proj.processing.active_runs.quantification = "count/starters/old_combination";
+	project.saveProjectJson();
+	var slug = pipelineRuns.buildRunSlug("count", {
+		predictionRunRel: "somata/run", slicesRunRel: "", subsetCount: 1,
+	});
+	var output = pipelineRuns.resolveStepOutputPath("count", {
+		slug: slug, branchOverride: "count/somata", runMode: "overwrite",
+	});
+	assert.strictEqual(output, path.join(quantBase, "count/somata", slug));
+	var outputRel = pipelineRuns.relFromRoleBase("count", output);
+	var merge = pipelineRun.preparePipelineRun("count", "merge", { outputRunRel: outputRel });
+	assert.deepStrictEqual(merge.toProcess, [dotted], "starters counts must not skip somata");
+	fs.mkdirSync(output, { recursive: true });
+	fs.writeFileSync(path.join(output, "count_results.csv"), "somata counts");
+	assert.ok(pipelineRuns.discoverOutputRuns(quantBase, "count").some(function (run) { return run.rel === outputRel; }));
+	assert.ok(pipelineRuns.discoverOutputRuns(quantBase, "collate").some(function (run) { return run.rel === outputRel; }));
+	assert.deepStrictEqual(pipelineRun.preparePipelineRun("count", "merge", {
+		outputRunRel: outputRel,
+	}).toProcess, [], "same combination must skip existing counts");
+	assert.deepStrictEqual(pipelineRun.preparePipelineRun("count", "overwrite", {
+		outputRunRel: outputRel,
+	}).toProcess, [dotted]);
+	assert.strictEqual(fs.readFileSync(path.join(oldCount, "count_results.csv"), "utf8"), "existing starters");
 
 	project.clearActiveProject();
 	helpers.rmDir(bundle);

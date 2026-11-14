@@ -32,7 +32,7 @@ function preparePipelineRun(stepId, runMode, options) {
 	var activeRuns =
 		(proj.processing && proj.processing.active_runs) ||
 		pipelineRuns.migrateActiveRuns(proj.processing);
-	if (options.outputRunRel) {
+	if (Object.prototype.hasOwnProperty.call(options, "outputRunRel")) {
 		var outCfg = fileIndex.STEP_OUTPUT[stepId];
 		if (outCfg && outCfg.role) {
 			activeRuns = Object.assign({}, activeRuns);
@@ -58,7 +58,7 @@ function preparePipelineRun(stepId, runMode, options) {
 		roles: roles,
 		activeRuns: activeRuns,
 	});
-	if (modes[stepId] !== mode) {
+	if (!options.preview && modes[stepId] !== mode) {
 		if (!proj.processing) {
 			proj.processing = {};
 		}
@@ -121,7 +121,7 @@ function preparePipelineRun(stepId, runMode, options) {
 		}
 	}
 
-	if (plan.toProcess.length) {
+	if (!options.preview && plan.toProcess.length) {
 		sliceListPath = fileIndex.writeRunSliceList(metaPath, plan.toProcess);
 	}
 	var summary =

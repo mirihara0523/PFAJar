@@ -9,6 +9,7 @@ from skimage.filters import threshold_otsu
 import numpy as np
 import argparse
 import inspect
+import time
 from pathlib import Path
 from skimage.exposure import equalize_adapthist
 from sahi import AutoDetectionModel
@@ -114,12 +115,16 @@ def _call_get_sliced_prediction(image, detection_model, tile_size, label):
 
 
 def run_sliced_detection(image, detection_model, tile_size, label):
+    started = time.perf_counter()
     print(
         f"{label}: starting tiled detection ({image.shape[1]}×{image.shape[0]} px, "
         f"tile {tile_size})…",
         flush=True,
     )
-    return _call_get_sliced_prediction(image, detection_model, tile_size, label)
+    result = _call_get_sliced_prediction(image, detection_model, tile_size, label)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    print(f"LOG: perf detect.inference label={label} {elapsed_ms:.1f}ms", flush=True)
+    return result
 
 
 def screen_predictions(
@@ -338,10 +343,12 @@ if __name__ == "__main__":
     written = 0
     failed_reads = 0
     n_files = len(files)
+    detect_started = time.perf_counter()
     for file_index, file in enumerate(files):
         file_path = os.path.join(input_dir, file)
         stripped, ext = file.split(".")[0], file.split(".")[-1]
         slice_id = _image_slice_id(file)
+        slice_started = time.perf_counter()
 
         print(f"Running detection on {file}...", flush=True)
         # Try and load the image
@@ -360,6 +367,11 @@ if __name__ == "__main__":
             else:
                 img = cv2.imread(file_path)
                 width, height, channels = img.shape
+            print(
+                f"LOG: perf detect.read slice={file} "
+                f"{(time.perf_counter() - slice_started) * 1000.0:.1f}ms",
+                flush=True,
+            )
         except Exception as e:
             print(f"Error reading {file}!", flush=True)
             print(e, flush=True)
@@ -518,6 +530,11 @@ if __name__ == "__main__":
             f"SLICE_DONE:{file_index + 1}/{n_files}:{file}",
             flush=True,
         )
+        print(
+            f"LOG: perf detect.slice.total slice={file} "
+            f"{(time.perf_counter() - slice_started) * 1000.0:.1f}ms",
+            flush=True,
+        )
 
     qc_result = write_run_histograms(
         qc_collector,
@@ -547,6 +564,11 @@ if __name__ == "__main__":
         + ("true" if args.per_slice_qc else "false")
         + " qc_only="
         + ("true" if args.qc_only else "false"),
+        flush=True,
+    )
+    print(
+        f"LOG: perf detect.total files={n_files} written={written} "
+        f"{(time.perf_counter() - detect_started) * 1000.0:.1f}ms",
         flush=True,
     )
 

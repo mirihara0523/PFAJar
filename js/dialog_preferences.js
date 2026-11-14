@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * App-wide dialog suppression prefs: ~/.masonjar/dialog_preferences.json
+ * App-wide dialog suppression prefs: ~/.pfajar/dialog_preferences.json
  * Schema shared with py/dialog_preferences.py
  */
 

@@ -3,6 +3,7 @@
 param(
     [Parameter(Mandatory=$true)][string[]]$Files,
     [switch]$Apply,
+    [switch]$UpdateVersion,
     [string]$Node = 'C:\Users\mirih\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
 )
 $ErrorActionPreference = 'Stop'
@@ -11,6 +12,17 @@ $target = 'D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64'
 $app = Join-Path $target 'resources\app'
 $coord = 'D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination'
 function Hash($p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash }
+function Assert-VersionOnlyPackageChange($sourceJson, $targetJson) {
+    $next = $sourceJson | ConvertFrom-Json
+    $previous = $targetJson | ConvertFrom-Json
+    $version = [string]$next.version
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version-only deployment requires a numeric major.minor.patch version.' }
+    $next.version = $previous.version
+    if (($next | ConvertTo-Json -Depth 100 -Compress) -cne ($previous | ConvertTo-Json -Depth 100 -Compress)) {
+        throw 'package.json has changes beyond version; dependency/packaging changes require full build review.'
+    }
+    return $version
+}
 function SafePath($root, $relative) {
     if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':')) { throw "Relative path required: $relative" }
     $full = [IO.Path]::GetFullPath((Join-Path $root $relative))
@@ -25,11 +37,16 @@ function SafePath($root, $relative) {
     return $full
 }
 if (!(Test-Path -LiteralPath (Join-Path $app 'package.json'))) { throw 'Unpacked target app missing; full build required.' }
-if ((Get-Content (Join-Path $source 'package.json') -Raw) -ne (Get-Content (Join-Path $app 'package.json') -Raw)) { throw 'package.json differs; review dependencies and perform full build.' }
+$sourcePackage = Get-Content (Join-Path $source 'package.json') -Raw
+$targetPackage = Get-Content (Join-Path $app 'package.json') -Raw
+if ($UpdateVersion) {
+    $nextVersion = Assert-VersionOnlyPackageChange $sourcePackage $targetPackage
+    $Files += 'package.json'
+} elseif ($sourcePackage -ne $targetPackage) { throw 'package.json differs; review dependencies and perform full build.' }
 $plan = @()
 foreach ($file in ($Files | Sort-Object -Unique)) {
     $rel = $file.Replace('/', '\')
-    if ($rel -notmatch '^(?:main|update_manager)\.js$|^(?:py|js|pages|css)\\[^:]+\.(?:py|js|html|css)$' -or $rel -match '(^|\\)\.\.(\\|$)') {
+    if (($rel -notmatch '^(?:main|update_manager)\.js$|^(?:py|js|pages|css)\\[^:]+\.(?:py|js|html|css)$' -and !($UpdateVersion -and $rel -eq 'package.json')) -or $rel -match '(^|\\)\.\.(\\|$)') {
         throw "Not a supported runtime file: $file. Compile TypeScript first; dependency/assets/deletion changes need a separate build review."
     }
     $src = SafePath $source $rel
@@ -39,8 +56,9 @@ foreach ($file in ($Files | Sort-Object -Unique)) {
     $new = Hash $src
     if ($old -ne $new) { $plan += [pscustomobject]@{File=$rel;Source=$src;Destination=$dst;Before=$old;After=$new} }
 }
-if (!$plan.Count) { Write-Output 'No changes in selected files.'; return }
+if (!$plan.Count -and !$UpdateVersion) { Write-Output 'No changes in selected files.'; return }
 $plan | Select-Object File,Before,After | Format-Table -AutoSize
+if ($UpdateVersion) { Write-Output "App and Windows executable version -> $nextVersion (version-only metadata update)." }
 if (!$Apply) { Write-Output 'Preview only. Run with -Apply after relevant regression tests pass.'; return }
 # Fail closed if process inspection is unavailable. Never stop user processes.
 $busy = @(Get-CimInstance Win32_Process | Where-Object {
@@ -61,6 +79,19 @@ foreach ($entry in $plan) {
 }
 $backup = Join-Path $coord ('deploy-backups\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $backup -Force | Out-Null
+if ($UpdateVersion) {
+    $executable = SafePath $target 'PFA Jar.exe'
+    $originalHash = Hash $executable
+    $staged = Join-Path $backup '_staging\PFA Jar.exe'
+    New-Item -ItemType Directory -Path (Split-Path $staged) -Force | Out-Null
+    Copy-Item -LiteralPath $executable -Destination $staged
+    $rcedit = Join-Path $source 'node_modules\rcedit\bin\rcedit-x64.exe'
+    & $rcedit $staged --set-file-version $nextVersion --set-product-version $nextVersion
+    if ($LASTEXITCODE) { throw 'Executable version resource update failed; runtime unchanged.' }
+    $info = (Get-Item -LiteralPath $staged).VersionInfo
+    if ($info.FileVersion -ne $nextVersion -or $info.ProductVersion -ne $nextVersion) { throw 'Staged executable version mismatch; runtime unchanged.' }
+    $plan += [pscustomobject]@{File='_executable\PFA Jar.exe';Source=$staged;Destination=$executable;Before=$originalHash;After=(Hash $staged)}
+}
 $plan | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $backup 'manifest.json') -Encoding UTF8
 foreach ($entry in $plan) {
     if ($entry.Before) {

@@ -28,7 +28,7 @@ Run from inside the PFA Jar source's py/ folder, with the app's bundled
 Python (only interpreter with SimpleITK/aicspylibczi/etc. installed):
 
     cd D:\\Claude\\masonjar-7.0.2-MC.1-improving\\py
-    C:\\Users\\mirih\\.masonjar\\benv\\Scripts\\python.exe align_seam_ab_test.py ^
+    C:\\Users\\mirih\\.pfajar\\benv\\Scripts\\python.exe align_seam_ab_test.py ^
         --dapi-dir "<path to the project's 00_dapi input folder used by Align>" ^
         --slice-id "M581-01(4)" ^
         --out-dir "D:\\Claude\\seam_ab_test_out"
@@ -85,7 +85,7 @@ try:
 except ImportError:
     print(
         "ERROR: cv2/numpy/nrrd not importable in this Python. Run with:\n"
-        r'  C:\Users\mirih\.masonjar\benv\Scripts\python.exe align_seam_ab_test.py ...',
+        r'  C:\Users\mirih\.pfajar\benv\Scripts\python.exe align_seam_ab_test.py ...',
         file=sys.stderr,
     )
     raise
@@ -182,7 +182,7 @@ def main() -> int:
     ap.add_argument("--out-dir", required=True, help="Where to write comparison PNGs")
     ap.add_argument(
         "--nrrd-dir",
-        default=str(Path.home() / ".masonjar" / "nrrd"),
+        default=str(Path.home() / ".pfajar" / "nrrd"),
         help=r"Default: %(default)s",
     )
     ap.add_argument(

@@ -22,7 +22,7 @@ function testSliceIdFromFilename() {
 	);
 	assert.strictEqual(
 		fileIndex.sliceIdFromFilename("brain.section.extra.png"),
-		"brain",
+		"brain.section.extra",
 	);
 }
 

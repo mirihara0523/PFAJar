@@ -6,6 +6,17 @@ Do not put file paths, test names, or IPC implementation details here—keep rel
 
 ---
 
+## v1.0.3
+
+**What's new**
+
+- **Independent PFA Jar environment:** Uses `~/.pfajar` to avoid conflicts with Mason Jar's Python environment. Existing model and atlas data can be copied, while Python and packages are installed separately.
+- **Live installation details:** Both first-time installation and subsequent package checks show recent pip output, elapsed time, and time since the last output. Quiet periods are distinguished from failures.
+- **Visible setup failures:** Stops the loading indicator, displays error details, and opens the error log automatically when setup fails.
+- **Performance logging by default:** Normal application launches now enable detailed performance logging without a separate batch file.
+
+---
+
 ## v1.0.1
 
 **What's new**

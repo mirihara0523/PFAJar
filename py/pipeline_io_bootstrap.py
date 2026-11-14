@@ -5,6 +5,10 @@ on the runpy main stack before returning. The worker calls
 io_fairshare.deactivate() after each job; do not leave background I/O that
 continues after __main__ returns.
 """
+import cpu_runtime
+
+cpu_runtime.configure_cpu()
+
 import io_fairshare
 
 io_fairshare.activate()

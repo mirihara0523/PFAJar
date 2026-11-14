@@ -26,7 +26,7 @@
       </div>
       <div class="row align-items-center">
         <div class="col d-grid">
-          <div class="fa-3x">
+          <div class="fa-3x" id="loadingSpinner">
             <i class="fas fa-spinner fa-spin"></i>
           </div>
         </div>
@@ -34,6 +34,18 @@
     <div class="row align-items-center">
       <div class="col d-grid">
         <p id="status">Starting up...</p>
+        <section id="packageProgress" hidden aria-label="Package installation details">
+          <p id="packageActivity" style="overflow-wrap: anywhere;"></p>
+          <p id="packageTiming"></p>
+          <p id="packageProcessState" role="status"></p>
+          <pre id="packageOutput" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto;"></pre>
+        </section>
+        <div id="setupFailure" hidden role="alert">
+          <p>Setup has stopped because of an error. It is not still updating.</p>
+          <pre id="setupFailureDetails" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto;"></pre>
+          <button id="showSetupLog" type="button" class="btn btn-outline-secondary">Show error log</button>
+          <p>Restart PFA Jar after resolving the error to retry setup.</p>
+        </div>
       </div>
     </div>
     <script src="../js/run.js" data-entry="loading.js"></script>

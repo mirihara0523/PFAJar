@@ -264,7 +264,7 @@ function buildGithubReleaseBody(version, opts) {
 	lines.push(
 		"### Upgrading",
 		"",
-		"Install over your previous PFA Jar folder or unzip to a new path. User data and models stay under `~/.masonjar` (Windows: `%USERPROFILE%\\.masonjar`).",
+		"Install over your previous PFA Jar folder or unzip to a new path. User data and models stay under `~/.pfajar` (Windows: `%USERPROFILE%\\.pfajar`).",
 		"",
 	);
 

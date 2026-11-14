@@ -938,6 +938,9 @@ function hasRunMarkers(dirPath, stepId) {
 }
 
 function discoveryMaxDepth(stepId) {
+	if (stepId === "count" || stepId === "collate") {
+		return 3; // count/<signal branch>/<prediction + alignment combination>
+	}
 	if (stepId === "max" || stepId === "sharpen" || stepId === "tophat" || stepId === "basic") {
 		return 3;
 	}
@@ -1688,7 +1691,7 @@ function resolveStepOutputPath(stepId, options) {
 		}
 	}
 
-	if (runMode === "overwrite") {
+	if (runMode === "overwrite" && stepId !== "count") {
 		var activeRel = getActiveRunRel(stepId);
 		if (
 			activeRel &&

@@ -40,6 +40,7 @@ def _batch_args(input_dir: Path, output_dir: Path, **overrides) -> argparse.Name
         "equalize": False,
         "slice_list": "",
         "preview": False,
+        "workers": str(sharpen.TILED_SHARPEN_WORKERS),
         "image": "",
         "x": "0",
         "y": "0",

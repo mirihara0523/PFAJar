@@ -1,6 +1,6 @@
 """Editable keyboard shortcuts for the atlas alignment viewer (map.py).
 
-Stores user-customized key sequences in ``~/.masonjar/align_shortcuts.json`` and
+Stores user-customized key sequences in ``~/.pfajar/align_shortcuts.json`` and
 provides a dialog to view/edit them. Kept separate from map.py to keep the viewer
 module focused.
 """
@@ -26,7 +26,7 @@ from qtpy.QtWidgets import (
 
 
 def shortcuts_config_path() -> Path:
-    return Path.home() / ".masonjar" / "align_shortcuts.json"
+    return Path.home() / ".pfajar" / "align_shortcuts.json"
 
 
 def load_shortcuts(defaults: dict) -> dict:

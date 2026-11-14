@@ -44,7 +44,7 @@
 import 완료 후 성능 로그는 다음처럼 요약할 수 있다. 이 도구는 로그를 수정하지 않는다.
 
 ```powershell
-node scripts/analyze-perf-log.js "C:\Users\mirih\.masonjar\masonjar.log"
+node scripts/analyze-perf-log.js "C:\Users\mirih\.pfajar\masonjar.log"
 ```
 
 미리보기는 `_preview_plane_from_stack()`에서 각 평면의 99번째 percentile을 비교해 가장 밝은 평면 하나를 고른다. 따라서 미리보기 자체는 모든 평면을 저장할 필요가 없고, 평면을 읽으며 현재 최고 평면만 보관하는 방식으로 바꿀 수 있다. 다만 DAPI preview는 선택된 평면을 다시 autoscale·downscale해 두 개의 PNG를 쓰므로, 원본 stack writer와 분리해 최적화해야 한다.
