@@ -1,0 +1,11 @@
+[
+  "js/section_order.js",
+  "js/menu_category.js",
+  "js/detect_live_host.js",
+  "pages/section_order.html",
+  "py/detect_live_worker.py",
+  "py/section_policy.py",
+  "js/section_policy.js",
+  "css/detect_live.css",
+  "py/slice_order.py"
+]

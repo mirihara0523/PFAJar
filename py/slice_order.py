@@ -31,14 +31,23 @@ def unique_ids(ids):
     return list(dict.fromkeys(x for x in ids if isinstance(x, str) and x))
 
 
-def read_order(path: Path | None) -> list[str]:
+def read_order_state(path):
     if path is None or not path.exists():
-        return []
+        return {"slice_ids": [], "custom_slice_ids": [], "mode": "filename"}
     data = json.loads(path.read_text(encoding="utf-8"))
     ids = data.get("slice_ids") if isinstance(data, dict) else None
-    if not isinstance(ids, list) or any(not isinstance(x, str) or not x for x in ids):
-        raise ValueError("Invalid slice order: expected slice_ids string array")
-    return unique_ids(ids)
+    custom = data.get("custom_slice_ids", ids) if isinstance(data, dict) else None
+    for values in (ids, custom):
+        if not isinstance(values, list) or any(not isinstance(x, str) or not x for x in values):
+            raise ValueError("Invalid slice order: expected section ID arrays")
+    mode = data.get("mode", "custom" if ids else "filename")
+    if mode not in ("filename", "custom", "ap_ascending", "ap_descending"):
+        raise ValueError("Invalid section order mode")
+    return {"slice_ids": unique_ids(ids), "custom_slice_ids": unique_ids(custom), "mode": mode}
+
+
+def read_order(path: Path | None) -> list[str]:
+    return read_order_state(path)["slice_ids"]
 
 
 def load_order(path: Path | None) -> list[str]:
@@ -60,13 +69,18 @@ def apply_order(items, ids, key=lambda x: x):
     ))
 
 
-def save_order(path: Path, ids, *, expected=None):
+def save_order(path: Path, ids, *, expected=None, custom_ids=None, mode=None, expected_custom=None, expected_mode=None):
     """Replace the visible subset's slots, retaining hidden IDs. Atomic write.
 
     An optimistic check refuses to overwrite an order edited by another window.
     Corrupt files are left intact for diagnosis rather than silently overwritten.
     """
-    previous = read_order(path)
+    state = read_order_state(path)
+    previous = state["slice_ids"]
+    if expected_custom is not None and state["custom_slice_ids"] != expected_custom:
+        raise ValueError("Custom order changed in another window. Reopen the dialog and try again.")
+    if expected_mode is not None and state["mode"] != expected_mode:
+        raise ValueError("Section order mode changed in another window. Reopen the dialog and try again.")
     if expected is not None and previous != expected:
         raise ValueError("Slice order changed in another window. Reopen the dialog and try again.")
     ids = unique_ids(ids)
@@ -74,13 +88,34 @@ def save_order(path: Path, ids, *, expected=None):
     replacement = iter(ids)
     merged = [next(replacement) if sid in selected else sid for sid in previous]
     merged.extend(replacement)
+    chosen_mode = mode or "custom"  # Older manual-order callers remain compatible.
+    if chosen_mode not in ("filename", "custom", "ap_ascending", "ap_descending"):
+        raise ValueError("Invalid section order mode")
+    if custom_ids is None:
+        custom_ids = ids if chosen_mode == "custom" else state["custom_slice_ids"]
+        if not custom_ids:
+            custom_ids = ids
+    else:
+        if not isinstance(custom_ids, list) or any(not isinstance(sid,str) or not sid for sid in custom_ids):
+            raise ValueError("Invalid custom section order")
+        if len(set(custom_ids)) != len(custom_ids):
+            raise ValueError("Custom order contains duplicate sections")
+        custom_ids = unique_ids(custom_ids)
+        if set(custom_ids) != set(ids):
+            raise ValueError("Custom order must include every visible section exactly once")
+    if chosen_mode == "custom" and custom_ids != ids:
+        raise ValueError("Active custom order must match the stored Custom sequence")
+    selected_custom = set(custom_ids)
+    replacement_custom = iter(custom_ids)
+    merged_custom = [next(replacement_custom) if sid in selected_custom else sid for sid in state["custom_slice_ids"]]
+    merged_custom.extend(replacement_custom)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_name = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
                                          prefix="slice-order-", suffix=".tmp", delete=False) as f:
             temp_name = f.name
-            json.dump({"version": 1, "slice_ids": merged}, f, ensure_ascii=False, indent=2)
+            json.dump({"version": 1, "slice_ids": merged, "custom_slice_ids": merged_custom, "mode": chosen_mode}, f, ensure_ascii=False, indent=2)
             f.write("\n")
         os.replace(temp_name, path)
     finally:

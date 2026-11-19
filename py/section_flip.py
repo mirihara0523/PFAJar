@@ -87,7 +87,12 @@ def inventory(root, sid):
                     continue
                 else:
                     raise ValueError('Unsupported section-associated file; flip cancelled: ' + rel)
-                result.append({'path': rel, 'kind': kind, 'size': path.stat().st_size, 'mtime_ns': path.stat().st_mtime_ns})
+                stamp = path.stat()
+                # Nanoseconds exceed JavaScript's safe integer range. The plan
+                # travels Python -> JSON -> Electron -> JSON -> Python; retain
+                # exact digits so unchanged files do not fail the review check.
+                result.append({'path': rel, 'kind': kind, 'size': stamp.st_size,
+                               'mtime_ns': str(stamp.st_mtime_ns)})
     return sorted(result, key=lambda row: row['path'])
 
 

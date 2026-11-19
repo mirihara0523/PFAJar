@@ -30,7 +30,7 @@ def policy_path(location, bundle_root=None):
 def read_settings(location, bundle_root=None, *, allow_pending=False):
     target = policy_path(location, bundle_root)
     if not allow_pending and windows_io_path(target.parent / 'section_flip_pending.json').exists():
-        raise ValueError('An interrupted section flip needs recovery. Open Align Sections Order before analysing this project.')
+        raise ValueError('An interrupted section flip needs recovery. Open Section Manager before analysing this project.')
     disk = windows_io_path(target)
     if not disk.exists():
         return {}

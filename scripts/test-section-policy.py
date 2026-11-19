@@ -1,6 +1,6 @@
 """Project policy and transactional section flip regression; temporary fixtures only."""
 from pathlib import Path
-import sys, tempfile, json, unittest, pickle, csv, os
+import sys, tempfile, json, unittest, pickle, csv, os, subprocess, shutil
 from unittest.mock import patch
 import numpy as np
 ROOT=Path(__file__).resolve().parents[1]
@@ -164,6 +164,50 @@ class PolicyTests(unittest.TestCase):
         obj.section_flip_x=True
         namespace['set_slice'](obj,image,image)
         np.testing.assert_array_equal(obj.label,image[:,::-1])
+
+    def javascript_roundtrip(self, payload):
+        node = os.environ.get('PFA_TEST_NODE') or shutil.which('node')
+        if not node:
+            candidate = Path.home()/'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe'
+            node = str(candidate) if candidate.is_file() else None
+        if not node:
+            self.skipTest('Node.js is required for the Electron JSON transport regression')
+        result = subprocess.run([node, '-e', 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(JSON.stringify(JSON.parse(s))));'],
+                                input=json.dumps(payload), text=True, capture_output=True, check=True)
+        return json.loads(result.stdout)
+
+    def test_flip_review_survives_actual_javascript_json_roundtrip(self):
+        self.fixture()
+        image=self.input/'a.1.png'
+        # Realistic Windows timestamp which loses 100 ns when sent as a JS Number.
+        stamp=1790369147439185600
+        os.utime(image,ns=(image.stat().st_atime_ns,stamp))
+        actual=image.stat().st_mtime_ns
+        self.assertNotEqual(self.javascript_roundtrip({'mtime_ns':actual})['mtime_ns'],actual)
+        plan=plan_flip(self.root,'a.1')
+        self.assertTrue(all(isinstance(row['mtime_ns'],str) for row in plan['files']))
+        received=self.javascript_roundtrip(plan)
+        self.assertEqual(received,plan)
+        result=apply_flip(self.root,'a.1',received)
+        self.assertEqual(result['files'],4)
+        self.assertTrue(read_settings(self.input)['a.1']['flip_x'])
+
+    def test_json_roundtrip_still_rejects_real_timestamp_and_settings_changes(self):
+        self.fixture();image=self.input/'a.1.png'
+        plan=self.javascript_roundtrip(plan_flip(self.root,'a.1'))
+        before=image.read_bytes();stamp=image.stat()
+        os.utime(image,ns=(stamp.st_atime_ns,stamp.st_mtime_ns+100))
+        self.assertNotEqual(image.stat().st_mtime_ns,stamp.st_mtime_ns)
+        with self.assertRaisesRegex(ValueError,'changed after review'):
+            apply_flip(self.root,'a.1',plan)
+        self.assertEqual(image.read_bytes(),before)
+        self.assertFalse((self.root/'.masonjar/section_flip_backups').exists())
+        plan=self.javascript_roundtrip(plan_flip(self.root,'a.1'))
+        save_active(self.input,{'a.1':False},{})
+        with self.assertRaisesRegex(ValueError,'changed after review'):
+            apply_flip(self.root,'a.1',plan)
+        self.assertEqual(image.read_bytes(),before)
+        self.assertFalse((self.root/'.masonjar/section_flip_backups').exists())
 
     def test_refuse_stale_or_unknown_without_changes(self):
         self.fixture();plan=plan_flip(self.root,'a.1');p=self.input/'a.1.png';old=p.read_bytes()

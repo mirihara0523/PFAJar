@@ -154,3 +154,45 @@ def test_reordering_preserves_current_file_ap_angles_and_labels(tmp_path, monkey
 def test_alignment_slice_parser_preserves_full_id():
     parse = controller_method("_slice_id_from_filename")
     assert parse("202607.M554.01.63.png") == "202607.M554.01.63"
+
+
+def test_legacy_order_becomes_initial_custom_without_rewriting(tmp_path):
+    from slice_order import read_order_state
+    target=tmp_path/"slice_order.json"
+    original=json.dumps({"version":1,"slice_ids":["b","a"]})
+    target.write_text(original)
+    assert read_order_state(target)=={"slice_ids":["b","a"],"custom_slice_ids":["b","a"],"mode":"custom"}
+    assert target.read_text()==original
+
+
+def test_custom_survives_filename_ap_save_and_reopen(tmp_path):
+    from slice_order import read_order_state
+    target=tmp_path/"slice_order.json"
+    custom=["c","a","b"]
+    save_order(target,custom)
+    save_order(target,["a","b","c"],mode="filename",custom_ids=custom,expected=custom,expected_custom=custom,expected_mode="custom")
+    assert read_order(target)==["a","b","c"]  # downstream uses effective order
+    assert read_order_state(target)["custom_slice_ids"]==custom
+    save_order(target,["b","c","a"],mode="ap_ascending",custom_ids=custom)
+    assert read_order_state(target)["custom_slice_ids"]==custom
+    save_order(target,custom,mode="custom",custom_ids=custom)
+    assert read_order(target)==custom
+
+
+def test_custom_subset_preserves_hidden_ids_and_rejects_conflicts(tmp_path):
+    from slice_order import read_order_state
+    target=tmp_path/"slice_order.json";save_order(target,["hidden","a","b"])
+    save_order(target,["a","b"],mode="filename",custom_ids=["b","a"])
+    state=read_order_state(target)
+    assert state["slice_ids"]==["hidden","a","b"]
+    assert state["custom_slice_ids"]==["hidden","b","a"]
+    before=target.read_bytes()
+    with pytest.raises(ValueError,match="Custom order changed"):
+        save_order(target,["a","b"],mode="filename",custom_ids=["a","b"],expected_custom=["hidden","a","b"])
+    assert target.read_bytes()==before
+    with pytest.raises(ValueError,match="mode changed"):
+        save_order(target,["a","b"],mode="filename",custom_ids=["b","a"],expected_mode="custom")
+    assert target.read_bytes()==before
+    with pytest.raises(ValueError):
+        save_order(target,["a","b"],mode="custom",custom_ids=["b","a"])
+    assert target.read_bytes()==before

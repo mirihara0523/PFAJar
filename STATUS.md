@@ -446,3 +446,255 @@ STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\ha
 Current checkpoint: runtime reflected Yes; product/app Windows version 1.0.4 verified; next step user visual acceptance.
 
 STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-104-20261118-180503
+
+
+## 2026-11-18 — Section flip review JSON timestamp precision fix (source only)
+
+- User reported Flip selected section left/right failing with Section files or settings changed after review. Latest runtime log masonjar-20261118_185231.log records repeated order_flip failures at the initial plan comparison, before backup/staging/replacement. Read-only investigation reproduced JavaScript Number rounding st_mtime_ns values: 13 of 30 source timestamps changed after JSON.parse/JSON.stringify, often by 100 ns, without editing any file. This explains false stale-plan detection; it is not evidence of background sync modifying samples.
+- User explicitly approved source fix/testing. py/section_flip.py inventory now captures one stat result and serializes mtime_ns as an exact decimal string, preserving digits across Python -> JSON -> Electron -> JSON -> Python. Existing signature/full-plan comparison and post-staging recheck remain strict; no tolerance or safety-check bypass introduced. Frontend requires no change. Old numeric plans must be discarded/reviewed anew after updating/restarting the worker.
+- scripts/test-section-policy.py now exercises actual installed Node.js JSON roundtrips instead of only Python dict comparisons or mocked UI results. Deterministic realistic timestamp reproduces old numeric rounding; new complete plan survives roundtrip and performs the four-file synthetic reflection. Separate test confirms a real 100 ns change and an Active-state change are rejected before any flip backup/replacement. Existing rollback/recovery/annotations/BBoxes/mask/TIFF/CZI/shared-order cases retained. All 13 tests passed in .pfajar Python with local D:/Claude/test-temp fixtures; Python AST syntax passed. No real project or image modified.
+- Previous Python-only transaction tests and mocked UI smoke did not cover JavaScript integer precision; transport regression now covers the missing integration boundary.
+- Pending runtime file: py/section_flip.py ONLY. Existing runtime, release staging folder, ZIP and GitHub remain unchanged. User has not approved runtime reflection for this fix; ask after presenting completed source/test result. If approved, sync-improving.ps1 -Files py/section_flip.py -Apply after closure, verify hash and reopen the order editor/review the flip again. Version stays 1.0.4 unless user requests otherwise. Development test file/STATUS are not runtime deployment files.
+- STATUS histories backed up separately before append. Deferred phase logging/tile batches 1/2/4 remain untouched; no commit/push/package generated.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-flip-json-precision-20261118-192849
+
+
+## 2026-11-18 — Section flip timestamp precision fix deployed
+
+- User explicitly approved reflection. sync-improving.ps1 applied py/section_flip.py only after process closure/syntax checks; backup and SHA-256 verified. Independent source/runtime hash comparison also passed. Deployment backup: D:/Claude/masonjar-7.0.2-MC.1-improving-win32-x64_coordination/deploy-backups/20261118-193047-0913f3123154408dac60f4cf28fe615b.
+- Version remains 1.0.4. User should restart PFA Jar, reopen Align Sections Order (test), and generate a fresh flip review before retrying. Actual sample reflection/user acceptance remains unverified; no real image was flipped by deployment.
+- Release staging folder D:/Claude/Releases/PFA Jar/PFA-Jar-1.0.4-win32-x64, existing ZIP/SHA256, and GitHub were NOT updated by this runtime-only reflection. Their section_flip.py may still be the old version. Source regression tests/STATUS changes remain uncommitted. No ZIP generated. Deferred performance experiments unchanged.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-flip-precision-20261118-193103
+
+
+## 2026-11-18 — Align Sections Order selected-row auto-scroll (source only)
+
+- User reported Previous/Next changing selection outside the visible slice-list viewport and explicitly approved source changes/testing. js/section_order.js now preserves list scrollTop while atomically replacing rows through a DocumentFragment, then scrolls only the list by the minimum amount needed to reveal the selected row. Already visible rows do not force a jump. No scrollIntoView call that might scroll the surrounding Options panel/document. Shared render path covers Previous/Next, selection, Up/Down, drag reorder, sort and reload.
+- Extended existing hidden Electron smoke with 63 section fixtures: direct selection of final/first rows, repeated Next/Previous across viewport boundaries, no jump when selected row already visible, outer sidebar scroll position unchanged, Up/Down moves across the viewport boundary, and filename sorting preserving/revealing the retained section at its new position. All cases passed together with previous AP sort/drag/save/conflict/reopen/Active/flip-button wiring cases. Expected injected conflict stderr is part of passing tests. JS syntax and scoped git whitespace check passed. Tests used local temporary fixture files/mocked image worker, not actual sample images.
+- Pending runtime file: js/section_order.js ONLY; development test scripts/smoke-section-order.js is not deployed. Runtime reflection requires separate explicit user approval; source-only authorization did not include deployment. Existing py/section_flip.py timestamp fix remains deployed from prior task. App/package version remains 1.0.4. Release staging/ZIP/GitHub unchanged; no commit or push.
+- STATUS histories backed up separately before append. Deferred performance logging and tile batches 1/2/4 remain untouched. After approved one-file reflection/reopening order editor, user acceptance: navigate a long list using Previous/Next and verify selected row stays visible without whole-sidebar movement.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-list-auto-scroll-20261118-193658
+
+
+## 2026-11-18 — Rename Align Sections Order (test) to Section Manager (source only)
+
+- User explicitly requested Section Manager naming. Changed Workspace > Atlas alignment menu label, native window title, HTML title/header, and user-facing inactive/recovery guidance. Internal filenames, IPC action names, saved JSON paths and behavior remain compatible; no data migration required. Version remains 1.0.4.
+- Source runtime files changed for this rename: js/menu_category.js, js/detect_live_host.js, pages/section_order.html, py/detect_live_worker.py, py/section_policy.py, js/section_policy.js. Prior auto-scroll change in js/section_order.js is still pending. Together SEVEN runtime files require explicit user-approved reflection; no -Apply performed. Test label assertion updated in scripts/test-detect-live-order.js (development only).
+- Validation passed: menu/order unit checks, supervised-host tests, file-index 12 cases, section-policy/flip 13 cases incl actual JavaScript timestamp roundtrip; existing hidden Section Manager Electron smoke includes navigation/scroll visibility, sorting/reorder/Active/flip wiring. No real project changed. Runtime/release/ZIP/GitHub unchanged; no commit or push. Source-only naming approval does not authorize deployment; request approval after reporting completed changes.
+- STATUS histories backed up separately before append. Deferred performance work and original-image semantics untouched. User acceptance after approved restart: menu/window/header all Section Manager, long-list selection tracking remains visible.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-rename-20261118-193957
+
+
+## 2026-11-18 — Section Manager header information/navigation swapped (source only)
+
+- User requested section information (e.g. 41 / 61 · M457_s047.png · AP 860) in the previous left navigation position and Previous/Next at the right. pages/section_order.html header now orders Section Manager title, section information, Previous, Next. Scoped CSS removes the shared count margin-left:auto for this window, gives information flexible width and keeps navigation buttons at the right with the existing 20px header padding. Long information can truncate rather than push buttons outside the window. Cell Detection Viewer header CSS/layout is unaffected by the scoped rules.
+- Existing hidden Section Manager Electron smoke passed actual geometry assertions: information before Previous, Previous before Next, and rightmost button 20px from window edge. Prior 63-row auto-scroll/Up/Down/sort/Active/flip/saved-order/conflict/reopen tests also passed. Expected injected conflict stderr is a passing-test fixture. Scoped git whitespace check passed. No actual sample or project was opened/changed by tests.
+- New source changes this task: pages/section_order.html and css/detect_live.css plus development smoke assertions. Combined pending runtime bundle (rename + selection auto-scroll + this layout) now EIGHT files; explicit list scripts/section-manager-runtime-files.json. Do not deploy the test/manifest file. Version remains 1.0.4. User authorized source layout modification only; runtime still awaits separate approval. No -Apply, ZIP, release staging/Desktop/GitHub/commit/push change.
+- STATUS histories backed up separately before append. Deferred performance experiments remain parked. After approved deployment/reopening, user acceptance: left section info, right Previous/Next with 20px edge margin, selected row remains visible during navigation.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-header-layout-20261118-194207
+
+
+## 2026-11-18 — Section Manager Browse row and full folder path display (source only)
+
+- User requested Browse to the left of Load / Reload and complete path/project name visibility for long DAPI paths. pages/section_order.html now places the buttons side-by-side below the path field. Replaced one-line path input with a full-width soft-wrapping textarea, auto-sized to content with no internal vertical/horizontal clipping. Exact underlying value remains unchanged (soft wraps are presentation only); tooltip also contains full path. JS resizes on typing, loading, initial context, error restore and window resize.
+- Source files changed: pages/section_order.html, css/detect_live.css, js/section_order.js; all already in pending eight-file scripts/section-manager-runtime-files.json bundle (rename/auto-scroll/header swap/path layout). No new dependency, behavior of section IDs/order/flip or app version changed. Version remains 1.0.4.
+- Updated hidden Electron smoke passed Browse-left-of-Reload geometry on same row, full wrapped exact Y:/Matt_Jacobs/masonjar_projects/M457_masonjar/data/counting/00_dapi example rendered using actual backslashes, no input-value/tooltip truncation or scroll overflow, and all prior 63-row selection tracking, header layout, sort/drag/save/conflict/reopen/Active/flip wiring checks. JS syntax and scoped git whitespace checks passed. Expected injected conflict stderr belongs to passing regression test.
+- Source only; runtime/release staging/ZIP/GitHub/real samples untouched. Explicit runtime approval still pending for the combined eight-file bundle. No commit/push/package. STATUS histories backed up separately before append. Deferred performance tests remain parked.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-path-display-20261118-194614
+
+
+## 2026-11-18 — Section Manager per-row Active checkboxes (source only)
+
+- User requested checkbox before each numbered section row instead of the separate selected-section Active checkbox. Implemented each row as [checked] 1. filename · AP …; new/default sections are checked, stored Inactive entries remain unchecked. Unchecking marks only that full section ID Inactive; the shared section policy still applies across all channels with that ID. Existing Save order / active states persists changes; checkbox tooltip explicitly says applies after Save. Removed the old separate Active section checkbox/listener/CSS.
+- Checkbox interaction does not select/reload the preview, alter section order or trigger inference. It preserves current list position even when toggling a row far from the selected preview, and restores checkbox focus after row redraw with preventScroll. Busy operations disable row checkboxes. Row text is dimmed/marked Inactive while the checkbox remains readable. Plain list/listitem plus aria-current now represents preview selection, allowing native accessible checkbox controls without nesting interactive controls in listbox options. Row keyboard selection ignores events from checkbox descendants.
+- Hidden Electron smoke passed default all-checked, toggling a non-selected row without preview requests/selection changes, focus preservation, rechecking restoring clean baseline, Save/reload preserving unchecked Inactive, and toggling offscreen row without jumping to current preview. All prior full-path display/Browse-row/header/63-row auto-scroll/Up/Down/sort/drag/conflict/Active/flip wiring tests still passed. Expected conflict stderr is a passing fixture. JS syntax passed; no real project modified.
+- Source-only changes js/section_order.js, pages/section_order.html, css/detect_live.css plus development smoke checks; no backend schema changes. Combined pending runtime bundle remains the same eight files in scripts/section-manager-runtime-files.json. Runtime reflection still requires explicit separate approval; no -Apply this task. Version remains 1.0.4. Release staging/ZIP/GitHub untouched; no commit/push/package. STATUS histories backed up separately before append. Deferred performance work untouched.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-row-active-checkboxes-20261118-195004
+
+
+## 2026-11-18 — Section Manager changes deployed as 1.0.5
+
+- User explicitly approved executable reflection as v1.0.5. Updated source package.json and package-lock.json app/root-package versions only, leaving dependency versions unchanged. Ran existing menu/order and host checks successfully, then sync-improving.ps1 using scripts/section-manager-runtime-files.json with -UpdateVersion -Apply. Target-process closure checks passed; syntax, staging executable version checks, backup/copy/SHA-256 completed.
+- Ten files applied: eight Section Manager bundle files, package.json and PFA Jar.exe version resource update. Backup: D:/Claude/masonjar-7.0.2-MC.1-improving-win32-x64_coordination/deploy-backups/20261118-195110-af8b4210c56f40efb1613d273e21d92e. Independently rechecked all eight bundle hashes plus package.json, verified previously deployed section_flip.py precision fix still matches source, runtime app version 1.0.5 and Windows FileVersion/ProductVersion 1.0.5.
+- Runtime now includes Section Manager menu/window naming; automatic selected-row tracking in long section lists; left section information/right Previous+Next with 20px padding; Browse to left of Load/Reload beneath full soft-wrapped DAPI path; per-row default-checked Active checkboxes preserving saved Inactive values, with Save order / active states persistence. Prior timestamp string/JSON flip fix remains applied. No schema/data migration.
+- This was selected-file reflection plus version-only executable update, not full repackaging. No app automatically launched and no actual sample/project data changed. Previous source/hidden UI regression results remain recorded; user visual/function acceptance after restart is pending.
+- STATUS histories backed up separately before append. Release staging folder, existing ZIP/SHA256, Desktop/GitHub unchanged; no archive/commit/push generated. Deferred performance logging/tile batches 1/2/4 and undecided Original image semantics untouched. If releasing 1.0.5 later, create a fresh staged distribution from this runtime rather than reusing the old 1.0.4 folder/archive.
+
+Current checkpoint: runtime reflected Yes; app and executable version 1.0.5 verified; next action user Section Manager verification after restart.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-105-section-manager-20261118-195147
+
+
+## 2026-11-18 — Section Manager read-only path in top bar, Browse removed (source only)
+
+- User requested read-only DAPI path moved to the top bar, removing Browse, and review whether external list/order/Active updates can really occur. Code review: CZI re-extraction/manual file operations can change DAPI files; Align Sections still has an existing Slice order… editor which calls save_order on shared slice_order.json. Active state is normally written by Section Manager, though another app instance/PC on the shared project can change it. Therefore manual Refresh remains useful for file/order changes or after a metadata conflict, without automatic overwriting of unsaved drafts.
+- Moved complete soft-wrapped read-only DAPI folder field to a second row in Section Manager header. Removed Browse button and frontend handler. Load / Reload renamed Refresh, placed beside top path. Folder continues to come from current project/workspace; no direct user path editing. Missing-context message explains to open/configure workspace and reopen. Path remains selectable/copyable even while processing. Header/main flex layout sizes preview/options to the remaining viewport height; section info/Previous/Next remain in their prior first-row locations. CSS is scoped to Section Manager.
+- Source runtime files changed: js/section_order.js, pages/section_order.html, css/detect_live.css. Version remains 1.0.5; no backend/schema changes. Older internal sectionOrderBrowse IPC registration is unused by this UI but retained to avoid changing host API unnecessarily.
+- Existing hidden Electron smoke passed readOnly/header placement/no Browse/Refresh label/full exact wrapped-path assertions plus previous menu/header geometry, per-row checkboxes, long-list scroll/reorder/sort, Save/reload/conflict and flip wiring cases. Expected injected-conflict stderr belongs to a passing test. JS syntax passed. No actual project/sample modified.
+- Source only, runtime reflection still requires separate user approval. Pending THREE runtime files listed above (existing scripts/section-manager-runtime-files.json includes them; previously deployed other entries should be no-ops). Runtime remains 1.0.5 with prior UI until reflection. Release staging/ZIP/GitHub unchanged, no commit/push/package. STATUS histories backed up separately before append; deferred performance work untouched.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-readonly-path-refresh-20261118-195955
+
+
+## 2026-11-18 — Section Manager Refresh removed; startup/reopen loading only (source only)
+
+- User confirmed no concurrent project modifications and explicitly chose removing Refresh. Removed Refresh button, click handler and obsolete busy-control reference. Sections/files/saved order/Active states still automatically read once on window opening. No auto-poll/focus reload introduced. If external data changes, close/reopen Section Manager; conflict remains fail-closed and frontend save-conflict guidance now says close/reopen rather than refer to a removed reload control.
+- Initial loading is named loadInitialSections; obsolete unsaved-reload confirmation removed because there is no reload entry point. Initial load errors retain the read-only configured path rather than blanking it. Top path stays selectable/read-only and soft-wrapped, and Browse remains removed. Busy state is exposed via body aria-busy for accessible state and regression checks.
+- Existing hidden Electron test now configures fixture workspace then actually closes/reopens the manager rather than driving the removed Refresh button. Passed initial automatic loading, saved-order/Inactive restoration on reopen, externally added fixture files appearing after reopen, no Browse/Refresh, read-only top path, conflict handling, and prior header/checkbox/scroll/sort/flip wiring cases. Tests do not open real samples. Expected injected conflict stderr is a passing fixture. JS syntax passed.
+- Runtime pending source files remain js/section_order.js, pages/section_order.html and css/detect_live.css (combined with preceding read-only top-path changes). Version remains 1.0.5. User approved source behavior, not runtime reflection; no -Apply. Runtime/release staging/ZIP/GitHub unchanged, no commit/push/package. STATUS histories backed up separately before append; deferred performance experiments remain parked.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-remove-refresh-20261118-200513
+
+
+## 2026-11-18 — Section Manager read-only top path and control removal deployed
+
+- User explicitly approved reflection. sync-improving.ps1 applied js/section_order.js, pages/section_order.html and css/detect_live.css after process closure/syntax checks; all 3 SHA-256 verified. Independent post-copy hashes also matched. Backup: D:/Claude/masonjar-7.0.2-MC.1-improving-win32-x64_coordination/deploy-backups/20261118-200829-4874892315484dd79b265c9760191c22.
+- Runtime now shows complete wrapped read-only DAPI folder in top header bar, with Browse and Refresh removed. Opening/reopening manager automatically loads current files/order/Active states. Version remains 1.0.5; no dependency/executable changes, no samples transformed or app automatically launched.
+- STATUS histories backed up separately before append. Release staging/ZIP/SHA256/Desktop/GitHub unchanged; no commit/push/package. User visual verification after restart remains pending. Deferred performance experiments unchanged.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-manager-path-controls-20261118-200846
+
+
+## 2026-11-18 — DAPI folder displayed as Save-location-style text (source only)
+
+- User requested DAPI folder formatting like Save location: <path>. Replaced top-bar label/textarea with plain paragraph using the same order-note typography: DAPI preview folder: <full path>. Full path wraps naturally and remains selectable/copyable; hover title contains exact path. Input box borders/padding/auto-height JS removed. Folder source remains configured project/workspace and backend reads the internal path variable rather than extracting path from the presentation text. Browse/Refresh remain absent and opening window still loads automatically.
+- Changed source runtime files js/section_order.js, pages/section_order.html and css/detect_live.css only. Runtime is still the previously deployed 1.0.5 textarea display until separate approval/reflection. No version/dependency/schema changes.
+- Updated hidden Electron fixture now uses an actual long local project-shaped folder path with M457_masonjar/data/counting/00_dapi. Passed exact full-prefix/path text, tooltip and font-size parity with Save location, plain-text/header/no Browse/no Refresh assertions and prior selection/checkbox/scroll/sort/save/reopen/flip wiring regressions. JS syntax passed. No real project was modified. Expected injected conflict stderr is a passing fixture.
+- STATUS histories backed up separately before append. No -Apply, release/ZIP/GitHub/Desktop/commit/push changes. Deferred performance experiments untouched. Pending runtime approval for the three display files above.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-path-text-format-20261118-202213
+
+
+## 2026-11-18 — Section Manager Up/Down row above section list (source only)
+
+- User requested the Up/Down buttons between the Drag sections… AP guidance and the section list. Moved existing order-actions row in pages/section_order.html directly after guidance and before orderList. No behavior/ID changes.
+- Existing hidden Electron smoke passed sorting/reordering, selection tracking, checkbox state, save/reopen/conflict and flip wiring. Explicit HTML order check confirms guidance -> Up/Down -> list. Expected conflict stderr is a passing test fixture. No real data modified.
+- Runtime reflection remains pending for js/section_order.js, pages/section_order.html and css/detect_live.css, combining prior plain-text top path and this button move. Version remains 1.0.5. No -Apply, release/ZIP/GitHub/commit/push. STATUS histories backed up separately before append; deferred performance work untouched.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-move-order-buttons-20261118-202334
+
+
+## 2026-11-18 — Independent Custom section order persistence (source only)
+
+- User explicitly requested Custom to be kept separately. Extended existing version-1 slice_order.json with custom_slice_ids and mode while retaining slice_ids as the effective saved analysis/navigation sequence. Filename/AP saves no longer replace manual Custom sequence. Existing old files initialize Custom from their currently saved slice_ids and default to Custom mode without rewriting on read. Missing/new visible sections append naturally; hidden subset IDs remain preserved independently in effective and Custom sequences.
+- Manager holds a separate in-memory Custom draft, updated only by manual drag/Up/Down. Switching Filename/AP and back to Custom restores the draft, even before Save. Save persists both current effective order/mode and Custom draft; mode/custom-only changes mark the editor dirty and participate in unsaved-close prompts. Reopening restores saved effective mode/order and retained Custom. Other analysis stages continue consuming slice_ids (the mode selected when Save was pressed), not the separate Custom list.
+- save_order remains atomic and supports old manual callers; legacy Align Sections manual editor updates effective + Custom together. New Manager save checks expected effective order, Custom and mode to reject stale edits. Invalid/duplicate Custom entries or Custom mode with a mismatched effective sequence are rejected before writing. Existing worker rollback of order file on Active-save failure preserves all new fields. No section IDs/AP/Active schemas changed.
+- Changed source runtime js/section_order.js, py/slice_order.py, py/detect_live_worker.py. Previous pending display/button move files pages/section_order.html and css/detect_live.css remain pending, so combined current reflection scope FIVE files. scripts/section-manager-runtime-files.json now also includes py/slice_order.py (nine entries; previously applied unchanged files are no-ops). Deploy frontend/worker/helper together after explicit approval to avoid incompatible partial API updates. Version remains 1.0.5.
+- Validation: slice-order/index pytest 24 passed (three new persistence/legacy/no-rewrite/subset/conflict cases); existing live-detection Python 14 passed; section policy/flip 13 passed. Extended hidden Electron smoke passed AP-save preserving Custom, unsaved manual draft -> Filename -> Custom restoration, saving Filename then reopening and restoring independent Custom, plus all previous long-list, checkbox, top-path, navigation, reorder, conflict and flip wiring cases. Python AST and scoped git whitespace checks passed. Expected injected conflict/cache stderr belongs to passing tests. No real project changed.
+- STATUS histories backed up separately before append. No runtime -Apply, release staging/ZIP/GitHub/commit/push; explicit deployment approval pending. Deferred performance experiments unchanged. User acceptance after reflection: set Custom and Save; select Filename/AP and Save; return to Custom and verify manual sequence, including after reopening.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\separate-custom-section-order-20261118-203031
+
+
+## 2026-11-18 — Section Manager Save location below DAPI folder (source only)
+
+- User requested input/save addresses together. Moved existing orderSource paragraph from right Options panel to top header, immediately after DAPI preview folder paragraph. Both use section-path/order-note styling, full-row wrapping and consistent font; element ID/backend population unchanged. Save location remains the metadata JSON path, not an image-output path.
+- Existing hidden Electron smoke passed exact DOM adjacency and actual vertical/header placement assertions, Save-location label rendering, and all prior independent Custom persistence, sorting/checkbox/scroll/navigation/flip wiring cases. No real project changed. Expected injected conflict stderr belongs to a passing regression.
+- This task changes pages/section_order.html plus development smoke assertion. Combined pending runtime scope remains FIVE files: js/section_order.js, pages/section_order.html, css/detect_live.css, py/slice_order.py, py/detect_live_worker.py (includes previously pending plain path/Up-Down placement/independent Custom). Runtime version remains 1.0.5 with no new reflection. Explicit user runtime approval required; no -Apply, release staging/ZIP/GitHub/commit/push. STATUS histories backed up separately before append. Deferred performance work untouched.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-address-rows-20261118-203144
+
+
+## 2026-11-18 — Section Manager Sort sections label/box inline (source only)
+
+- User requested Sort sections: [box] layout. Wrapped label/select in scoped horizontal flex row; fixed label width from content, flexible select fills remaining Options-panel width; label margin reset and colon added. Changed pages/section_order.html and css/detect_live.css only, plus existing development smoke geometry assertion.
+- Hidden Electron regression passed actual left/right placement and vertical-centre alignment, alongside prior Custom persistence/header address/checkbox/scroll/reorder/navigation/flip wiring cases. Expected conflict stderr belongs to a passing test. No real sample changed.
+- Combined runtime scope still FIVE pending files: js/section_order.js, pages/section_order.html, css/detect_live.css, py/slice_order.py, py/detect_live_worker.py. Version remains 1.0.5. No runtime reflection, release/ZIP/GitHub/commit/push; separate explicit approval required. STATUS histories backed up separately before append; deferred performance experiments untouched.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-sort-inline-20261118-203243
+
+
+## 2026-11-18 — Section Manager Custom/UI bundle deployed
+
+- User explicitly approved runtime reflection. Applied js/section_order.js, pages/section_order.html, css/detect_live.css, py/slice_order.py and py/detect_live_worker.py using sync-improving.ps1 after closure/syntax checks; all five source/runtime SHA-256 comparisons passed independently. Backup: D:/Claude/masonjar-7.0.2-MC.1-improving-win32-x64_coordination/deploy-backups/20261118-203324-55c34696819e4311bdd115da4a384a5b.
+- Runtime now includes plain-text DAPI path plus Save location immediately below it in header, Up/Down between guidance and section list, Sort sections label/select inline, and independently retained Custom order/draft/mode metadata. Previously removed Browse/Refresh remain absent. Other analyses consume effective saved slice_ids; Custom backup remains separate. Version remains 1.0.5; no executable/dependency update.
+- STATUS histories backed up separately before append. No actual data migrated or sample reflected by deployment; existing order schema extends on next user Save. No app automatically launched. User acceptance after restart remains: verify UI layout; save Custom, save Filename/AP, return to Custom and confirm retained manual sequence.
+- Release staging/ZIP/SHA256/Desktop/GitHub unchanged; source changes not committed/pushed by this action. No ZIP generated. Deferred performance experiments remain untouched.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-manager-custom-ui-20261118-203343
+
+
+## 2026-11-18 — Section Manager independent two-column header (source only)
+
+- Left header column now groups title/section information on the first row and an address block beneath it containing DAPI preview folder then Save location on separate lines. Previous/Next occupy their own right navigation column, vertically centered across the header. Long paths wrap within the left column; existing 20px right padding retained. Scope is Section Manager only.
+- Hidden Electron regression passed real geometry checks for independent columns, address grouping below heading, centered navigation, right margin, and prior sorting/Custom/Active/scroll/flip workflows. Expected injected conflict stderr belongs to the passing test. No actual project changed.
+- Pending runtime files: pages/section_order.html and css/detect_live.css only. Development regression scripts/smoke-section-order.js updated. Version remains 1.0.5. No runtime reflection: separate user approval required. No ZIP, release staging, GitHub, commit or push. Both STATUS histories backed up before append.
+
+STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-two-column-header-20261118-204228
+
+
+## 2026-11-18 — Section Manager compact controls and preview status (source only)
+
+- Sort selector, Up/Down and flip controls now use font-sized compact height (3px vertical padding, 1.25 line height). Flip shortened to Flip Left/Right…; existing explanatory tooltip and review/confirmation logic retained. Section list has 15px top/bottom gaps, matching existing Flip/Save gap.
+- Moved the existing orderStatus live region from sidebar into a dedicated status bar below image viewport; errors/progress/Preview ready continue using the same ID and error styling. Preview pane flex layout reserves bar height without overlaying image.
+- Hidden Electron regression passed compact-control geometry, exact matching gaps, status placement and existing header/order/Custom/Active/navigation/flip flows. Initial development check exposed a missing moved status node, corrected before the successful full rerun. Injected conflict stderr is expected. No real data changed.
+- Pending runtime files, including preceding header task: pages/section_order.html and css/detect_live.css. Development smoke updated. Version 1.0.5 unchanged. Separate user approval required for runtime reflection; no Apply/ZIP/release/GitHub/commit/push. Separate STATUS backups: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-compact-status-20261118-204942
+
+
+## 2026-11-18 — Section Manager header/compact controls/status deployed
+
+- User explicitly approved reflection. sync-improving.ps1 applied pages/section_order.html and css/detect_live.css after application-closure guard. Both SHA256 hashes independently rechecked against source. Deployment backup: D:/Claude/masonjar-7.0.2-MC.1-improving-win32-x64_coordination/deploy-backups/20261118-205613-414609905bbb403a834d2c320572e1cb.
+- Runtime includes independent right navigation column, grouped left title/info and two address lines, compact sort/Up/Down/Flip controls, Flip Left/Right… label, 15px list gaps and image-bottom status bar. Prior hidden Electron regression passed. User visual acceptance after restart remains. Version stays 1.0.5; no app auto-launch, release staging/ZIP/GitHub/commit/push. No pending runtime files from these UI tasks.
+- Both STATUS histories backed up before append: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-section-manager-layout-20261118-205628
+
+
+## 2026-11-18 — Section Manager footer and keyboard shortcuts (source only)
+
+- Save button sits at bottom of right column aligned with preview pane bottom; upper controls scroll independently. Previous/Next use equal-width grid columns. Section-list gaps retained at 15px.
+- ArrowUp/ArrowDown invoke Previous/Next (selection navigation, not reordering). Backspace/Delete toggle current selected section Active via existing checkbox change path, remaining pending until Save. Held deletion keys ignored after first event. Keyboard handler ignores modifiers, composition, select/text editing and open dialogs; busy state and boundaries respected. Checkbox title documents shortcuts.
+- Hidden Electron smoke passed navigation, active-toggle/repeat guard, footer alignment/equal width, tooltip and existing order/Custom/Active/flip workflows. Expected injected conflict stderr belongs to passing tests. No real data changed.
+- Pending runtime files: pages/section_order.html, css/detect_live.css, js/section_order.js. Development smoke updated. Version remains 1.0.5. Runtime reflection awaits separate approval; no ZIP/release/GitHub/commit/push. STATUS backup: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-manager-shortcuts-footer-20261118-210353
+
+
+## 2026-11-18 — Section Manager shortcut hover guidance (source only)
+
+- Previous and Next native tooltips now document actual ArrowUp/ArrowDown navigation shortcuts, with aria-keyshortcuts. Existing Active checkbox tooltip retained and accessibility shortcut metadata added. Section rows document existing focused-row Enter/Space selection. Up/Down reorder, Flip and Save have no dedicated shortcut assigned, so no invented shortcuts are advertised. No keyboard behavior changes.
+- Verified tooltip attributes, JavaScript syntax and scoped whitespace checks. Pending runtime scope including prior footer/shortcut work remains pages/section_order.html, css/detect_live.css, js/section_order.js. Version 1.0.5; no runtime Apply/release/ZIP/GitHub/commit/push. Separate runtime approval required. STATUS histories backed up: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-shortcut-tooltips-20261118-210430
+
+
+## 2026-11-18 — Clarify Active shortcut tooltip (source only)
+
+- English checkbox tooltip explicitly states: Backspace / Delete: toggle the current section between Active and Inactive. Existing Checked/Unchecked and after-Save explanation retained. Text-only change, no behavior changes.
+- Pending runtime bundle remains pages/section_order.html, css/detect_live.css, js/section_order.js; version 1.0.5. No runtime reflection without separate approval. STATUS backups: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\active-shortcut-wording-20261118-210842
+
+
+## 2026-11-18 — Section Manager footer/keyboard/English tooltips deployed
+
+- Explicit user approval received. Applied pages/section_order.html, css/detect_live.css and js/section_order.js through sync-improving.ps1 with application closure guard; SHA256 verified by script and independently against source. Backup: D:/Claude/masonjar-7.0.2-MC.1-improving-win32-x64_coordination/deploy-backups/20261118-210916-45989d243d3c411fa3c0cc971b9ca567.
+- Runtime now includes bottom-aligned Save, equal Previous/Next widths, ArrowUp/ArrowDown navigation, Backspace/Delete Active toggle with repeat guard, and English shortcut hover guidance explicitly naming Active/Inactive. Changes remain pending until Save. Prior hidden Electron regression passed; user interactive acceptance after restart remains.
+- No pending runtime files from these tasks. Version remains 1.0.5; no app auto-launch, release staging/ZIP/GitHub/commit/push. Both STATUS histories backed up before append: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-section-shortcuts-20261118-210931
+
+
+## 2026-11-18 — Save bottom aligned to status top (source only)
+
+- Corrected user intent: Save bottom aligns with image status bar TOP border, not preview pane bottom. ResizeObserver measures actual status height and reserves matching sidebar bottom padding; handles text wrapping/window resize without hardcoded height.
+- Hidden Electron regression passed exact Save/status top geometry for normal and deliberately wrapped status messages, plus prior workflow tests. Expected injected conflict stderr belongs to passing regression. No actual data changed.
+- Pending runtime files: css/detect_live.css and js/section_order.js. Development smoke updated. Version 1.0.5 unchanged. Separate approval required for runtime reflection. No Apply/ZIP/release/GitHub/commit/push. Both STATUS backups: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\save-align-status-top-20261118-212241
+
+
+## 2026-11-18 — Ctrl-arrow reorder shortcuts (source only)
+
+- Ctrl+ArrowUp/ArrowDown invoke existing Up/Down reorder buttons; keeps selected section/preview and updates Custom draft/dirty state through existing move path. Plain arrows retain Previous/Next navigation; Ctrl+other keys remain untouched. Busy/boundary/editing/modifier/composition guards retained. English button titles and aria-keyshortcuts added. Save required to persist.
+- Hidden Electron regression passed actual Ctrl-arrow reorder/restoration, stable selected section and no extra preview requests, English tooltip checks and all prior workflow/footer tests. Expected injected conflict stderr belongs to passing test.
+- Combined pending runtime scope: js/section_order.js, css/detect_live.css (prior Save/status-top alignment), pages/section_order.html. Development smoke updated. Version 1.0.5 unchanged. Runtime reflection awaits explicit approval; no Apply/ZIP/release/GitHub/commit/push. STATUS backups: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\section-reorder-shortcuts-20261118-212453
+
+
+## 2026-11-18 — Space/Enter Active toggle (source only)
+
+- Space and Enter now toggle CURRENT selected section Active/Inactive alongside Backspace/Delete. Removed previous focused-row Enter/Space selection binding; tooltip and aria-keyshortcuts updated in English. Prevents checkbox native double activation and held-key repeat. Buttons/links keep native Enter/Space activation; text/select controls, modifiers, busy state remain protected. Changes persist only on Save.
+- Hidden Electron regression passed Space on checkbox, Enter on selected row, held Enter suppression, tooltip and existing workflow/shortcuts/footer tests. Synthetic key events validate application handler; actual user keyboard acceptance after deployment remains. Expected conflict stderr belongs to passing test.
+- Combined pending runtime scope remains js/section_order.js, css/detect_live.css, pages/section_order.html. Version 1.0.5 unchanged. No runtime reflection/release/ZIP/GitHub/commit/push. Separate approval required. Both STATUS backups: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\active-space-enter-20261118-212709
+
+
+## 2026-11-18 — Section Manager Save alignment and shortcut bundle deployed
+
+- User explicitly approved reflection. Applied pages/section_order.html, css/detect_live.css and js/section_order.js using sync-improving.ps1 with app closure guard. Script SHA256 verification and independent source/runtime hashes passed. Backup: D:/Claude/masonjar-7.0.2-MC.1-improving-win32-x64_coordination/deploy-backups/20261118-212821-a3c72c48c71d488c99f0303aa75de9c9.
+- Runtime includes Save bottom aligned to status TOP border with dynamic wrapped-status height; Ctrl+Up/Down section reorder and English hover guidance; Space/Enter/Backspace/Delete current Active toggle with repeat protection. Buttons keep native Space/Enter activation as user accepted; plain Up/Down remain Previous/Next. Save required for order/Active persistence. Hidden Electron regression passed before deployment; actual keyboard/visual acceptance after restart remains.
+- No pending runtime changes from these tasks. Version remains 1.0.5. No auto-launch, ZIP/release staging/GitHub/commit/push. Both STATUS histories backed up before append: D:\Claude\masonjar-7.0.2-MC.1-improving-win32-x64_coordination\handoffs\deployed-section-keyboard-save-alignment-20261118-212837

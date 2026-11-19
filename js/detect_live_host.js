@@ -122,7 +122,7 @@ function registerDetectionViewer(options) {
 		actions: ["load", "detect", "filter", "save", "order_info"],
 	});
 	registerWorkerViewer(options, {
-		title: "Align Sections Order (test)", page: "section_order.html", open: "openSectionOrderViewer",
+		title: "Section Manager", page: "section_order.html", open: "openSectionOrderViewer",
 		browse: "sectionOrderBrowse", request: "sectionOrderRequest", progress: "sectionOrderProgress", status: "sectionOrderStatus",
 		actions: ["order_info", "order_save", "order_preview", "order_flip_plan", "order_flip"],
 	});

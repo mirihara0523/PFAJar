@@ -152,10 +152,10 @@ class DetectionSession:
 
     def order_info(self, request):
         import math
-        from slice_order import read_order
+        from slice_order import read_order_state
         from slice_index import slice_stem_from_image_filename
         target = self.order_file(request)
-        result = {"path": str(target), "saved_order": [], "ap_positions": {}, "warnings": []}
+        result = {"path": str(target), "saved_order": [], "custom_order": [], "mode": "filename", "ap_positions": {}, "warnings": []}
         if request.get("recover_flip") and request.get("bundle_root"):
             from section_flip import recover_flip
             if recover_flip(request["bundle_root"]):
@@ -163,7 +163,8 @@ class DetectionSession:
         from section_policy import read_settings
         result["sections"] = read_settings(request["input_dir"], request.get("bundle_root") or None)
         try:
-            result["saved_order"] = read_order(windows_io_path(target))
+            order_state = read_order_state(windows_io_path(target))
+            result.update(saved_order=order_state["slice_ids"], custom_order=order_state["custom_slice_ids"], mode=order_state["mode"])
         except (OSError, ValueError) as error:
             result["warnings"].append("Saved order could not be read: " + str(error))
         dapi_dir = request.get("dapi_dir")
@@ -187,7 +188,7 @@ class DetectionSession:
         return result
 
     def order_save(self, request):
-        from slice_order import save_order
+        from slice_order import save_order, read_order_state
         from slice_index import slice_stem_from_image_filename
         input_dir = windows_io_path(request["input_dir"])
         names = [path.name for path in input_dir.iterdir()
@@ -203,7 +204,7 @@ class DetectionSession:
             raise ValueError("Section settings changed in another window. Reload and try again.")
         disk = windows_io_path(target)
         previous = disk.read_bytes() if disk.exists() else None
-        saved = save_order(disk, selected, expected=request["expected"])
+        saved = save_order(disk, selected, expected=request["expected"], custom_ids=request.get("custom_order"), mode=request.get("mode"), expected_custom=request.get("expected_custom"), expected_mode=request.get("expected_mode"))
         try:
             if "active" in request:
                 if set(request["active"]) != set(ids):
@@ -215,7 +216,8 @@ class DetectionSession:
             else:
                 atomic_write(disk, lambda stream: stream.write(previous))
             raise
-        return {"saved_order": saved, "path": str(target), "sections": current}
+        order_state = read_order_state(disk)
+        return {"saved_order": saved, "custom_order": order_state["custom_slice_ids"], "mode": order_state["mode"], "path": str(target), "sections": current}
 
     def order_flip_plan(self, request):
         from section_flip import plan_flip
@@ -253,7 +255,7 @@ class DetectionSession:
         plane = 0  # Keep saved settings/cache identities compatible with earlier single-plane runs.
         from section_policy import active_ids, file_id
         if not active_ids([file_id(source.name)], source):
-            raise ValueError("This section is inactive. Reactivate it in Align Sections Order before detection.")
+            raise ValueError("This section is inactive. Reactivate it in Section Manager before detection.")
         image = read_single_plane(source)
         self.report("preprocess")
         gray = (equalize_adapthist(image, clip_limit=0.01) * 255).astype(np.uint8)

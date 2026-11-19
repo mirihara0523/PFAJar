@@ -3,7 +3,7 @@ const fs = require("fs"), path = require("path");
 function readSettings(root) {
   if (!root) return {};
   const meta = path.join(root, ".masonjar");
-  if (fs.existsSync(path.join(meta, "section_flip_pending.json"))) throw new Error("An interrupted section flip needs recovery. Open Align Sections Order before analysing this project.");
+  if (fs.existsSync(path.join(meta, "section_flip_pending.json"))) throw new Error("An interrupted section flip needs recovery. Open Section Manager before analysing this project.");
   const file = path.join(meta, "section_settings.json");
   if (!fs.existsSync(file)) return {};
   const raw = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));

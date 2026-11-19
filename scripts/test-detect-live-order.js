@@ -12,7 +12,7 @@ assert.deepStrictEqual(sortSections(files, "custom", {}, ["s10", "hidden", "s1"]
 assert.strictEqual(files[0], "s10.tif", "sorting must not mutate input");
 const menu = fs.readFileSync(path.join(__dirname, "../js/menu_category.js"), "utf8");
 const alignment = menu.slice(menu.indexOf("alignment:"), menu.indexOf("detection:"));
-assert.ok(alignment.indexOf('label: "Align Sections Order (test)"') < alignment.indexOf('label: "Align Sections"'));
+assert.ok(alignment.indexOf('label: "Section Manager"') < alignment.indexOf('label: "Align Sections"'));
 assert.ok(alignment.includes('action: "openSectionOrderViewer"'));
 console.log("Section order: natural filenames, AP including zero/missing values, custom subsets and dotted IDs passed.");
 

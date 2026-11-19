@@ -35,7 +35,7 @@ var CATEGORIES = {
 	alignment: {
 		title: "Atlas alignment",
 		tools: [
-			{ label: "Align Sections Order (test)", action: "openSectionOrderViewer" },
+			{ label: "Section Manager", action: "openSectionOrderViewer" },
 			{ label: "Align Sections", href: "./align.html" },
 			{ label: "Viewer/Editor", href: "./adjust.html" },
 			{ label: "Parcellation (bulk)", href: "./parcellation_wizard.html" },
