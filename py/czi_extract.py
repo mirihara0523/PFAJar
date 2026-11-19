@@ -764,6 +764,9 @@ def extract_z_stack(
     perf_log.perf_memory("czi.before_z_stack")
     if not z_indices:
         raise ValueError("No Z planes selected")
+    from section_policy import read_settings
+    section_states = read_settings(bundle_root, bundle_root) if bundle_root else {}
+    section_flip_x = section_states.get(slice_id, {}).get("flip_x", False)
     depth = bit_depth_for_role(cfg or {}, role_key)
     # [plane, sampled_p99, optional_exact_p99].  At most one full-res plane is
     # retained, preserving the streaming memory bound.
@@ -848,6 +851,8 @@ def extract_z_stack(
                 plane = single_peak_plane
             else:
                 plane = read_one(z)
+            if section_flip_x:
+                plane = np.ascontiguousarray(plane[:, ::-1])
             if preview_path is not None or role_key == ROLE_DAPI:
                 start = time.perf_counter()
                 score, sample_pixels = _preview_score_sample(plane)
@@ -941,6 +946,19 @@ def extract_z_stack(
                 slice_id=slice_id,
             )
         _perf_acc("preview", time.perf_counter() - _t_prev)
+
+    if bundle_root is not None and slice_id in section_states:
+        # Re-extraction replaces pixels from raw CZI: old Orient operations no
+        # longer describe these new files. Keep seam-grid orientation explicit.
+        from geometry_history import append_geometry_history
+        destinations = [out_path, stream_max_path, preview_path]
+        if role_key == ROLE_DAPI:
+            destinations += [orient_dapi_preview_path(bundle_root, slice_id), dapi_preview_path(bundle_root, slice_id)]
+        for destination in dict.fromkeys(path for path in destinations if path is not None):
+            if destination.is_file():
+                append_geometry_history(bundle_root, {"kind": "file", "ok": True,
+                    "file": destination.resolve().relative_to(Path(bundle_root).resolve()).as_posix(),
+                    "reset": True, "ops": ["flipX"] if section_flip_x else [], "source": "czi-section-orientation"})
 
 
 def slice_id_for_scene(file_entry: dict, scene_index: int) -> str:

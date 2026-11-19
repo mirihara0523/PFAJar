@@ -1,7 +1,7 @@
 "use strict";
 const assert=require("assert"),fs=require("fs"),path=require("path"),vm=require("vm");
 const listeners={},nodes={};
-for(const id of ["status","loadingSpinner","setupFailure","setupFailureDetails","packageProgress","packageActivity","packageTiming","packageProcessState","packageOutput"]){
+for(const id of ["status","loadingSpinner","setupFailure","setupFailureDetails","packageProgress","packageActivity","packageTiming","packageProcessState","packageOutput","packageDetails"]){
 	nodes[id]={hidden:false,textContent:"",scrollTop:0,clientHeight:100,scrollHeight:100};
 }
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../js/loading.js"),"utf8"),{
@@ -9,6 +9,9 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../js/loading.js"),"utf8
 });
 const base={id:"one",startedAt:10,elapsedMs:65000,quietMs:1000,activity:"Downloading torch",lines:["Collecting torch"],state:"running"};
 listeners.packageInstallProgress(null,base);
+assert.ok(!nodes.packageDetails.open,"normal output must not expand technical details");
+const html=fs.readFileSync(path.join(__dirname,"../pages/loading.html"),"utf8");
+assert.ok(/<details id="packageDetails">/.test(html),"technical details collapsed by default");
 assert.ok(nodes.packageActivity.textContent.includes("Downloading torch"));assert.ok(nodes.packageTiming.textContent.includes("01:05"));
 assert.strictEqual(nodes.packageProgress.hidden,false);
 listeners.packageInstallProgress(null,{...base,quietMs:30000,lines:[]});
@@ -17,6 +20,8 @@ listeners.packageInstallProgress(null,{...base,lines:Array.from({length:200},(_,
 assert.strictEqual(nodes.packageOutput.textContent.split("\n").length,150);
 listeners.packageInstallProgress(null,{...base,state:"complete",lines:[]});
 assert.ok(nodes.packageProcessState.textContent.includes("completed"));
+listeners.packageInstallProgress(null,{...base,state:"failed",lines:["ERROR: fixture"]});
+assert.strictEqual(nodes.packageDetails.open,true,"errors reveal diagnostic details");
 listeners.bootstrapFailed(null,{environment:".pfajar",detail:"fixture failure"});
 const previous=nodes.packageProcessState.textContent;
 listeners.packageInstallProgress(null,{...base,lines:["late output"],quietMs:0});

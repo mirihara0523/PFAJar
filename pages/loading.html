@@ -38,7 +38,10 @@
           <p id="packageActivity" style="overflow-wrap: anywhere;"></p>
           <p id="packageTiming"></p>
           <p id="packageProcessState" role="status"></p>
-          <pre id="packageOutput" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto;"></pre>
+          <details id="packageDetails">
+            <summary>Technical details</summary>
+            <pre id="packageOutput" style="white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto;"></pre>
+          </details>
         </section>
         <div id="setupFailure" hidden role="alert">
           <p>Setup has stopped because of an error. It is not still updating.</p>

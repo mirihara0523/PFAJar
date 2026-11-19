@@ -22,11 +22,11 @@ ipc.on("packageInstallProgress", function (_event, progress) {
 	var panel = document.getElementById("packageProgress");
 	if (panel) panel.hidden = false;
 	var activity = document.getElementById("packageActivity");
-	if (activity) activity.textContent = "Current activity: " + (progress.activity || "Starting pip…");
+	if (activity) activity.textContent = progress.activity || "Checking required packages…";
 	var timing = document.getElementById("packageTiming");
 	if (timing) timing.textContent = "Elapsed: " + duration(progress.elapsedMs) + " · Last output: " + duration(progress.quietMs) + " ago";
 	var state = document.getElementById("packageProcessState");
-	if (state) state.textContent = progress.state === "complete" ? "Package installation completed."
+	if (state) state.textContent = progress.state === "complete" ? "Package check completed. Required packages are ready."
 		: progress.state === "failed" ? "Package installation failed — stopped."
 		: progress.quietMs >= 15000 ? "No new output for " + Math.floor(progress.quietMs / 1000) + " seconds; the process is still running."
 		: "Process running.";
@@ -40,6 +40,8 @@ ipc.on("packageInstallProgress", function (_event, progress) {
 		}
 	}
 	if (progress.state === "failed") {
+		var technicalDetails = document.getElementById("packageDetails");
+		if (technicalDetails) technicalDetails.open = true;
 		var status = document.getElementById("status");
 		if (status) status.textContent = "Package installation failed — updating has stopped.";
 		var spinner = document.getElementById("loadingSpinner");

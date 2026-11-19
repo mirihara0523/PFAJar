@@ -65,7 +65,7 @@ function parseDetectParams(form) {
 	var m = "";
 	var mc = false;
 
-	if (form.confidence && form.confidence.value && form.confidence.value < 1 && form.confidence.value > 0) {
+	if (form.confidence && form.confidence.value && Number(form.confidence.value) <= 1 && Number(form.confidence.value) > 0) {
 		c = checkNumber(
 			form.confidence.value,
 			"Confidence should be a float between 0-1, using default.",
@@ -77,8 +77,8 @@ function parseDetectParams(form) {
 	if (
 		form.eccentricity &&
 		form.eccentricity.value &&
-		form.eccentricity.value < 1 &&
-		form.eccentricity.value > 0
+		Number(form.eccentricity.value) <= 1 &&
+		Number(form.eccentricity.value) >= 0
 	) {
 		e = checkNumber(
 			form.eccentricity.value,
@@ -88,7 +88,7 @@ function parseDetectParams(form) {
 			: 0.2;
 	}
 
-	if (form.area && form.area.value && form.area.value > 0) {
+	if (form.area && form.area.value && Number(form.area.value) >= 0) {
 		a = checkNumber(form.area.value, "Area should be an integer, using default.")
 			? Number(form.area.value)
 			: 200;

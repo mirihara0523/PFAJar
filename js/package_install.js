@@ -5,11 +5,24 @@ const { StringDecoder } = require("string_decoder");
 let sequence = 0;
 const MAX_LINES = 150;
 
+function packageActivity(text) {
+	const verified = /^Requirement already satisfied:\s*([A-Za-z0-9_.-]+)/i.exec(text);
+	if (verified) return "Checking installed packages: " + verified[1];
+	const collecting = /^Collecting\s+([A-Za-z0-9_.-]+)/i.exec(text);
+	if (collecting) return "Preparing package: " + collecting[1];
+	if (/^Downloading\s/i.test(text)) return "Downloading required packages…";
+	if (/^Using cached\s/i.test(text)) return "Preparing cached packages…";
+	if (/^Installing collected packages:/i.test(text)) return "Installing required packages…";
+	if (/^Successfully installed\s/i.test(text)) return "Required packages installed.";
+	if (/^(Building wheel|Preparing metadata|Getting requirements)/i.test(text)) return "Preparing package installation…";
+	return null;
+}
+
 /** Stream pip output without buffering the entire installation in exec(). */
 function installRequirements(options) {
 	const id = "packages-" + Date.now() + "-" + (++sequence);
 	const startedAt = Date.now();
-	let lastOutputAt = startedAt, activity = "Starting pip…";
+	let lastOutputAt = startedAt, activity = "Checking required packages…";
 	let pending = [], tail = [], done = false;
 	let flushTimer, heartbeat;
 	const streams = [
@@ -27,7 +40,7 @@ function installRequirements(options) {
 		if (!text) return;
 		text = text.slice(-8192);
 		lastOutputAt = Date.now();
-		activity = text;
+		activity = packageActivity(text) || activity;
 		tail.push(text); if (tail.length > MAX_LINES) tail.shift();
 		pending.push(text); if (pending.length > MAX_LINES) pending.shift();
 		try { if (options.onLog) options.onLog(text); } catch (_error) { /* Best effort. */ }
@@ -77,4 +90,4 @@ function installRequirements(options) {
 	});
 }
 
-module.exports = { installRequirements };
+module.exports = { installRequirements, packageActivity };

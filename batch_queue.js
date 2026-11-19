@@ -630,10 +630,9 @@ function preflightJob(deps, proj, stepId, plan, onLine) {
             const inputIds = listImageSliceIds(stepPaths.indir || "");
             candidateIds = intersectSliceIds(annoIds, inputIds);
         }
+        candidateIds = require(path.join(__dirname, "js", "section_policy")).activeIds(candidateIds, proj.path);
         if (!candidateIds.length) {
-            // Leave the slice list off (defaults to scanning input dir); python will fail loudly if there's nothing.
-            onLine(`[repair] ${stepId}: no slice intersection found; running without --slice-list`);
-            return { skip: false };
+            return { skip: true, reason: "no active matching sections" };
         }
         const sliceListPath = writeSliceList(metaPath, candidateIds);
         onLine(`[repair] wrote ${stepId} slice list (${candidateIds.length}) → ${sliceListPath}`);

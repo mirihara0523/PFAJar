@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
+  <title>Align Sections Order (test) — PFA Jar</title>
+  <link rel="stylesheet" href="../css/detect_live.css">
+</head>
+<body class="section-order-viewer">
+  <header><strong>Align Sections Order (test)</strong><button id="orderPrevious">Previous</button><button id="orderNext">Next</button><span id="count"></span></header>
+  <main>
+    <div id="viewport"><img id="sectionPreview" alt="Selected DAPI section" hidden></div>
+    <aside>
+      <label for="orderInput">DAPI preview folder</label>
+      <div class="path"><input id="orderInput"><button id="orderBrowse">Browse</button></div>
+      <button id="reloadOrder">Load / Reload</button>
+      <label for="orderMode">Sort sections</label>
+      <select id="orderMode"><option value="filename">Filename</option><option value="ap_ascending">AP ascending</option><option value="ap_descending">AP descending</option><option value="custom">Custom</option></select>
+      <p id="orderSource" class="order-note"></p>
+      <p class="order-note">Drag sections or use Up / Down. AP uses saved alignment positions, which may include estimates. Missing AP sorts last.</p>
+      <ol id="orderList" role="listbox" aria-label="Sections"></ol>
+      <div class="order-actions"><button id="orderUp">Up</button><button id="orderDown">Down</button></div>
+      <label><input id="sectionActive" type="checkbox" checked> Active section (include in subsequent analyses)</label>
+      <button id="flipSection" title="Save pending changes first. Requires a project with data under its data folder. Close other analysis windows before applying.">Flip selected section left / right…</button>
+      <button id="saveSectionOrder" class="primary">Save order / active states</button>
+      <p id="orderStatus" role="status">Choose a DAPI preview folder.</p>
+    </aside>
+  </main>
+  <script src="../js/run.js" data-entry="section_order.js"></script>
+</body>
+</html>

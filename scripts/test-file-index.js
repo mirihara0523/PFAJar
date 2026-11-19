@@ -299,7 +299,43 @@ function testOutputExistsSharpenTophat() {
 	helpers.rmDir(bundle);
 }
 
+function testSectionPolicy() {
+  const root = helpers.tmpDir("pfa-active-");
+  try {
+    const meta = path.join(root, ".masonjar"); fs.mkdirSync(meta);
+    const policy = path.join(meta, "section_settings.json");
+    fs.writeFileSync(policy, JSON.stringify({version:1, sections:{"a.1":{active:false}}}));
+    assert.deepStrictEqual(fileIndex.getProcessingSliceIds(root, {}, null, {matchedSliceIds:["a.1","a.2"]}), ["a.2"]);
+    const plan = fileIndex.planRun(root, "detect", {mode:"overwrite", sliceIds:["a.1","a.2"]});
+    assert.deepStrictEqual(plan.toProcess,["a.2"]);
+    assert.deepStrictEqual(plan.skipped,[{sliceId:"a.1",reason:"inactive"}]);
+    fs.writeFileSync(policy, JSON.stringify({version:1, sections:{"a.1":{active:false},"a.2":{active:false}}}));
+    assert.deepStrictEqual(fileIndex.planRun(root,"detect",{mode:"overwrite",sliceIds:["a.1","a.2"]}).toProcess,[]);
+    fs.writeFileSync(path.join(meta,"section_flip_pending.json"),"{}");
+    assert.throws(()=>fileIndex.planRun(root,"detect",{sliceIds:["a.1"]}),/interrupted/);
+    fs.unlinkSync(path.join(meta,"section_flip_pending.json"));
+    fs.writeFileSync(policy,"{}");
+    assert.throws(()=>fileIndex.getProcessingSliceIds(root,{},null,{matchedSliceIds:["a.1"]}),/Invalid/);
+  } finally { helpers.rmDir(root); }
+}
+
+function testSharedOrderAcrossSteps() {
+  const root=helpers.tmpDir("pfa-order-stages-");
+  try {
+    const meta=path.join(root,".masonjar");fs.mkdirSync(meta);
+    fs.writeFileSync(path.join(meta,"section_settings.json"),JSON.stringify({version:1,sections:{"001":{active:false}}}));
+    fs.writeFileSync(path.join(meta,"slice_order.json"),JSON.stringify({version:1,slice_ids:["003","001","002"]}));
+    for(const stepId of ["align","adjust","detect","count","intensity","max","sharpen","tophat","seam","tissue_cleanup","parcellation"]) {
+      assert.deepStrictEqual(fileIndex.getProcessingSliceIds(root,{},null,{matchedSliceIds:["001","002","003"]},{stepId}),["003","002"],stepId);
+    }
+    const requested=require("../js/section_policy").activeIds(["001","002","003"],root);
+    assert.deepStrictEqual(fileIndex.planRun(root,"detect",{mode:"overwrite",sliceIds:["001","002","003"]}).toProcess,["003","002"]);
+  } finally { helpers.rmDir(root); }
+}
+
 var tests = [
+  testSharedOrderAcrossSteps,
+  testSectionPolicy,
 	testSliceIdFromFilename,
 	testListImageFiles,
 	testMatchReport,

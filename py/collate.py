@@ -42,6 +42,37 @@ def _read_totals_block(csv_path: Path) -> dict[str, tuple[int, int]]:
         Colocalization Matrix (by Section)
         ...
     """
+    from section_policy import read_settings, file_id
+    states = read_settings(csv_path)
+    if any(state.get("active", True) is False for state in states.values()):
+        # Older Totals include inactive slices; recompute from per-section blocks.
+        totals = {}
+        current = None
+        header = False
+        seen = False
+        with open(csv_path, newline="") as source:
+            for row in csv.reader(source):
+                if not row:
+                    current = None
+                    header = False
+                    continue
+                if row[0].strip() == "Totals":
+                    break
+                if len(row) == 1:
+                    current = file_id(row[0].strip())
+                    seen = True
+                    continue
+                if row[0].strip() == "Region Acronym":
+                    if len(row) < 4 or row[2].strip() != "Area (px)":
+                        raise ValueError("Unsupported per-section count CSV; rerun Count Brain before collating inactive sections.")
+                    header = True
+                    continue
+                if current is not None and header and states.get(current, {}).get("active", True):
+                    previous = totals.get(row[0], (0, 0))
+                    totals[row[0]] = (previous[0] + sum(int(value or 0) for value in row[3:]), previous[1] + int(row[2] or 0))
+        if not seen:
+            raise ValueError("No per-section count records; rerun Count Brain to exclude inactive sections.")
+        return totals
     out: dict[str, tuple[int, int]] = {}
     in_totals = False
     header_seen = False

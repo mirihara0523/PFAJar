@@ -6,6 +6,7 @@ import json
 import threading
 import time
 import perf_log
+from slice_order import apply_order, load_order, order_path, read_order, save_order
 from datetime import datetime, timezone
 import numpy as np
 import cv2
@@ -521,8 +522,8 @@ class AtlasSlice:
         return "Whole brain"
 
     def slice_id(self) -> str:
-        stem = ".".join(self.section_name.split(".")[:-1]) if "." in self.section_name else self.section_name
-        return stem.split(".")[0]
+        from slice_index import slice_stem_from_image_filename
+        return slice_stem_from_image_filename(self.section_name)
 
     def set_damage_mask(self):
         """Open atlas damage marker for regions missing on tissue."""
@@ -574,6 +575,7 @@ class AtlasSlice:
             self.x_angle,
             self.y_angle,
             self.hemisphere,
+            getattr(self, "section_flip_x", False),
         )
         if (
             getattr(self, "_slice_cache_key", None) == cache_key
@@ -590,6 +592,9 @@ class AtlasSlice:
         ).astype(np.uint32)
         self.image = crop_planar_for_hemisphere(self.image, self.hemisphere)
         self.label = crop_planar_for_hemisphere(self.label, self.hemisphere)
+        if getattr(self, "section_flip_x", False):
+            self.image = np.ascontiguousarray(self.image[:, ::-1])
+            self.label = np.ascontiguousarray(self.label[:, ::-1])
         self._slice_cache_key = cache_key
 
     def get_registered(
@@ -1028,6 +1033,7 @@ class AlignmentController:
                     self.apply_layout_all_button,
                     placeholder_label=True,
                 ),
+                self._make_slice_order_button(),
             ],
         )
         self.sidebar_sections.add_section(
@@ -1585,8 +1591,8 @@ class AlignmentController:
 
     @staticmethod
     def _slice_id_from_filename(name: str) -> str:
-        stem = ".".join(name.split(".")[:-1]) if "." in name else name
-        return stem.split(".")[0]
+        from slice_index import slice_stem_from_image_filename
+        return slice_stem_from_image_filename(name)
 
     def _init_parcellation_controls(self):
         from structure_catalog import (
@@ -1802,6 +1808,8 @@ class AlignmentController:
                 reason=reason,
                 layout_mode=self.layout_mode,
             )
+            payload["session_doc"]["slice_order"] = list(self.file_list)
+            payload["session_doc"]["ap_locked"] = bool(self._ap_locked)
         except Exception as exc:
             print(
                 f"LOG: align_session_snapshot_failed reason={reason} error={exc}",
@@ -1883,13 +1891,20 @@ class AlignmentController:
         # Natural sort so non-zero-padded names (s1, s2, …, s10, s11) order
         # correctly instead of lexicographically (s1, s10, s11, s2, …), which
         # would otherwise scramble the section order and AP extrapolation.
-        self.file_list = natural_sort_filenames(self.file_list)
+        from section_policy import active_files, read_settings
+        self.section_settings = read_settings(self.input_path, self.bundle_root)
+        self.file_list = active_files(natural_sort_filenames(self.file_list), self.input_path)
         if self.slice_filter is not None:
             self.file_list = [
                 name
                 for name in self.file_list
                 if self._slice_id_from_filename(name) in self.slice_filter
             ]
+        self._project_slice_order_path = order_path(self.input_path, self.bundle_root)
+        self.file_list = apply_order(
+            self.file_list, load_order(self._project_slice_order_path),
+            key=self._slice_id_from_filename,
+        )
         self.num_slices = len(self.file_list)
         print(4 + self.num_slices, flush=True)
         print("Scanned input path for images...", flush=True)
@@ -1904,6 +1919,55 @@ class AlignmentController:
     def _alignment_flags_path(self) -> Path:
         """Per AGENTS.md: flags next to alignment outputs under ``<slices>/.masonjar/``."""
         return Path(self.output_path) / ".masonjar" / "alignment_flags.json"
+
+    def _make_slice_order_button(self):
+        button = QPushButton("Slice order…")
+        button.setToolTip("Reorder project sections without renaming files or changing AP values.")
+        button.clicked.connect(self.edit_slice_order)
+        return button
+
+    def edit_slice_order(self):
+        from slice_order_dialog import SliceOrderDialog
+        from qtpy.QtWidgets import QDialog
+        path = self._project_slice_order_path
+        if path is None:
+            QMessageBox.information(None, "Slice order", "Open a project to save a shared slice order.")
+            return
+        self._sync_current_slice_from_controls()
+        try:
+            expected = read_order(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(None, "Slice order", str(exc))
+            return
+        current_name = self.file_list[self.current_section]
+        positions = {name: getattr(self.atlas_slices.get(name), "ap_position", None)
+                     for name in self.file_list}
+        dialog = SliceOrderDialog(self.file_list, positions,
+                                  getattr(self, "_qt_window", None))
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        names = dialog.names()
+        if names == self.file_list:
+            return
+        if len(names) != len(self.file_list) or set(names) != set(self.file_list):
+            QMessageBox.warning(None, "Slice order", "Every section must appear exactly once.")
+            return
+        try:
+            save_order(path, [self._slice_id_from_filename(n) for n in names], expected=expected)
+        except (OSError, ValueError) as exc:
+            print(f"LOG: slice_order_save_failed path={path} error={exc}", flush=True)
+            QMessageBox.warning(None, "Slice order", str(exc))
+            return
+        self.file_list = names
+        self.current_section = names.index(current_name)
+        # An index prefix no longer represents which files have been tuned.
+        # Preserve all AP values; explicit Force AP on Next remains available.
+        self._ap_locked = True
+        self._seed_predicted_delta_from_slices()
+        self.progress_bar.setValue(self.current_section + 1)
+        self.progress_bar.setFormat(f"{self.current_section + 1} / {self.num_slices}")
+        self.update_section_header()
+        self.persist_alignment_session("slice_order")
 
     def update_section_header(self):
         """Slice index + filename in the dock; sync Napari / OS window title."""
@@ -2025,6 +2089,8 @@ class AlignmentController:
         rehydrated: dict = {}
         for _, atlas_slice in raw_slices.items():
             old_name = atlas_slice.section_name
+            if old_name not in self.file_list:
+                continue
             old_x = atlas_slice.x_angle
             old_y = atlas_slice.y_angle
             old_pos = atlas_slice.ap_position
@@ -2052,6 +2118,10 @@ class AlignmentController:
                 region=old_region,
                 hemisphere=old_hemi,
             )
+            mirrored = self.section_settings.get(self._slice_id_from_filename(old_name), {}).get("flip_x", False)
+            restored.section_flip_x = mirrored
+            if mirrored != getattr(atlas_slice, "section_flip_x", False) and old_damage is not None:
+                old_damage = np.ascontiguousarray(old_damage[:, ::-1])
             restored.linked = old_linked
             restored.layout_confidence = old_conf
             restored.layout_low_confidence = old_low
@@ -2087,6 +2157,8 @@ class AlignmentController:
 
             self._rehydrate_atlas_slices(result.atlas_slices)
             self.prior_alignment = True
+            if self.file_list != natural_sort_filenames(self.file_list):
+                self._ap_locked = True
             self._seed_predicted_delta_from_slices()
             restore_nav = result.restore_navigation
             print(
@@ -2101,6 +2173,13 @@ class AlignmentController:
 
             if result.session:
                 self._apply_parcellation_state(result.session.get("parcellation"))
+                previous_order = result.session.get("slice_order")
+                custom_order = self.file_list != natural_sort_filenames(self.file_list)
+                if (result.session.get("ap_locked") or
+                        (previous_order is not None and previous_order != self.file_list) or
+                        (previous_order is None and custom_order)):
+                    self._ap_locked = True
+                    print("LOG: align_ap_extrapolate locked reason=slice_order", flush=True)
                 if ap_extrapolation_locked(result.session, self.num_slices):
                     self._ap_locked = True
                     print(
@@ -2255,6 +2334,7 @@ class AlignmentController:
                     average_y,
                     hemisphere=slice_hemi,
                 )
+                predicted_slice.section_flip_x = self.section_settings.get(self._slice_id_from_filename(self.file_list[i]), {}).get("flip_x", False)
                 predicted_slice.layout_confidence = slice_conf
                 predicted_slice.layout_low_confidence = slice_low
                 predicted_slice.layout_overridden = False
@@ -3130,6 +3210,7 @@ class AlignmentController:
             else None,
             "warp_ok": warp_ok,
             "warp_failed": warp_failed,
+            "slice_order": [self._slice_id_from_filename(n) for n in self.file_list],
             "slice_layouts": {},
             "slice_warp_masks": slice_warp_masks,
         }
@@ -3282,7 +3363,7 @@ if __name__ == "__main__":
         "-i", "--input", help="input directory, only use if graphical false", default=""
     )
     parser.add_argument("-m", "--model", default="../models/predictor_encoder.pt")
-    parser.add_argument("-s", "--sam", default="~/.belljar/models/sam_vit_b.pth")
+    parser.add_argument("-s", "--sam", default="~/.pfajar/models/sam_vit_b.pth")
     parser.add_argument("-n", "--nrrd", help="path to nrrd files", default="")
     parser.add_argument("-w", "--whole", default=False)
     parser.add_argument(

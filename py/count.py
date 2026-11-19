@@ -173,6 +173,9 @@ if __name__ == "__main__":
     predictionFiles = [
         name for name in os.listdir(prediction_path) if name.endswith("pkl")
     ]
+    from section_policy import active_files
+    annotation_files = active_files(annotation_files, annotation_path)
+    predictionFiles = active_files(predictionFiles, prediction_path)
     allowed_slices = load_slice_list(args.slice_list.strip() or None)
 
     if allowed_slices is not None:
@@ -197,6 +200,7 @@ if __name__ == "__main__":
             )
 
     paired = pair_prediction_annotation_pkls(predictionFiles, annotation_files)
+    paired = active_files(paired, prediction_path, key=lambda pair: slice_stem_from_prediction_pkl(pair[0]))
     paired_stems = {slice_stem_from_prediction_pkl(p) for p, _ in paired}
     for p_name in sorted(
         predictionFiles, key=lambda x: slice_stem_from_prediction_pkl(x)

@@ -776,7 +776,17 @@ function makeHandle(record: JobRecord, homeDir: string): PythonJobHandle {
  * Callers may attach additional listeners only via onMessage/onStderr options,
  * or use handle.pyshell when via==="shell" (e.g. pyshell.send).
  */
+let maintenanceOwner: string | null = null;
+export function acquirePythonMaintenance(owner: string): () => void {
+  if (maintenanceOwner || !activeJobs.has(owner) || activeJobs.size !== 1) {
+    throw new Error("Close other analysis windows and wait for running jobs before changing section orientation.");
+  }
+  maintenanceOwner = owner;
+  return () => { if (maintenanceOwner === owner) maintenanceOwner = null; };
+}
+
 export function runPythonJob(opts: RunPythonJobOptions): PythonJobHandle {
+  if (maintenanceOwner) throw new Error("A section orientation change is running. Wait for it to finish before starting analysis.");
   if (useWorkerFor(opts.script, opts.forceShell)) {
     return runViaWorker(opts);
   }

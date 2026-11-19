@@ -33,7 +33,8 @@ def load_slice_list(path: str | Path | None) -> set[str] | None:
         return set()
     if isinstance(data, dict) and "slice_ids" in data:
         data = data["slice_ids"]
-    return {str(x) for x in data}
+    from section_policy import active_ids
+    return set(active_ids([str(x) for x in data], p))
 
 
 def slice_id_allowed(slice_id: str, allowed: set[str] | None) -> bool:
@@ -50,7 +51,7 @@ def slice_stem_from_prediction_pkl(filename: str) -> str:
         stem = stem[len("predictions_") :]
     if stem.lower().endswith(".ome"):
         stem = Path(stem).stem
-    return stem.split(".")[0]
+    return stem
 
 
 def slice_stem_from_image_filename(filename: str) -> str:
@@ -58,7 +59,7 @@ def slice_stem_from_image_filename(filename: str) -> str:
     stem = Path(filename).stem
     if stem.lower().endswith(".ome"):
         stem = Path(stem).stem
-    return stem.split(".")[0]
+    return stem
 
 
 def slice_stem_from_annotation_pkl(filename: str) -> str:
@@ -71,7 +72,7 @@ def slice_stem_from_annotation_pkl(filename: str) -> str:
         stem = stem[len("annotations_") :]
     if stem.lower().endswith(".ome"):
         stem = Path(stem).stem
-    return stem.split(".")[0]
+    return stem
 
 
 def index_image_files(names: Iterable[str]) -> dict[str, str]:
@@ -139,10 +140,15 @@ def build_adjust_pairs(
     pairs_base, orphan_images, orphan_annos = pair_image_annotation_files(
         image_names, annotation_names, allowed
     )
+    from section_policy import active_files
+    pairs_base = active_files(pairs_base, img_dir, key=lambda row: row[2])
     pairs = [
         (str(img_dir / img_name), str(annotation_dir / ann_name), slice_id)
         for img_name, ann_name, slice_id in pairs_base
     ]
+    # Local import avoids a cycle: slice_order also uses the canonical ID parser.
+    from slice_order import apply_order, load_order, order_path
+    pairs = apply_order(pairs, load_order(order_path(img_dir)), key=lambda p: p[2])
     return pairs, orphan_images, orphan_annos
 
 

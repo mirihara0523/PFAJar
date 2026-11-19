@@ -560,5 +560,45 @@ projectIndexBusy.populatePage(function () {
 	workspace.bindPathPicker(qs("indir"), "indir", "max");
 	workspace.bindPathPicker(qs("outdir"), "outdir", "predictions");
 	workspace.bindPathPicker(qs("model"), "model", null, true);
+	applyViewerTransfer();
 	setStep(1);
 });
+
+function applyViewerTransfer() {
+    var raw = new URLSearchParams(window.location.search).get("viewerSettings");
+    if (!raw) return;
+    var notice = qs("viewerTransferNotice");
+    try {
+        var handoff = require("./detect_handoff");
+        var settings = handoff.normalize(JSON.parse(raw));
+        handoff.assertProject(settings, project.isActive() ? project.getBundleRoot() : "");
+        detectionMethod = settings.method === "nuclei" ? "nuclei" : "somata";
+        if (methods) methods.textContent = settings.method === "custom" ? "Custom model" : (settings.method === "nuclei" ? "Nuclei" : "Somata");
+        if (project.isActive()) {
+            var branch = qs("detectSignalBranch"), datasets = qs("detectMaxDataset");
+            if (branch && settings.signalBranch && Array.from(branch.options).some(option=>option.value===settings.signalBranch)) branch.value = settings.signalBranch;
+            if (datasetPicker) datasetPicker.refresh();
+            if (datasets) {
+                var available = maxDatasets.listDatasetsForBranch(project.getBundleRoot(), branch ? branch.value : settings.signalBranch);
+                var chosen = available.find(item=>path.resolve(item.abs).toLowerCase()===path.resolve(settings.indir).toLowerCase());
+                if (chosen) datasets.value = chosen.rel;
+                else {
+                    var option = document.createElement("option"); option.value = "__viewer_input__";
+                    option.textContent = "Viewer input (exact folder)"; datasets.appendChild(option); datasets.value=option.value;
+                }
+            }
+        }
+        // Apply last, after project presets and dataset picker initialization.
+        handoff.applyForm(formRefs(),settings);
+        var advanced = qs("collapseAdvanced"); if (advanced) advanced.classList.add("show");
+        notice.textContent = "Settings copied from Cell Detection Viewer. Confidence, area, eccentricity and intensity cutoff are preserved. Review the input/output and select Next — Process. Candidate confidence floor is Viewer-only; this run uses Confidence for detection.";
+        notice.classList.remove("d-none");
+        // Keep this a one-shot transfer when this page is later revisited.
+        var clean = new URL(window.location.href); clean.searchParams.delete("viewerSettings");
+        history.replaceState(null,"",clean.href);
+    } catch(error) {
+        notice.textContent = "Viewer settings could not be applied: " + error.message;
+        notice.classList.remove("d-none"); notice.classList.add("alert-danger");
+        qs("step1Next").disabled = true;
+    }
+}

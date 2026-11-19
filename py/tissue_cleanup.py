@@ -401,7 +401,12 @@ def apply_masks_batch(bundle_root: Path, config: dict) -> dict:
     cfg = _load_cfg(config, bundle_root)
 
     jobs: list[tuple[str, Path, np.ndarray, float | None, str]] = []
-    for slice_id, spec in slices_cfg.items():
+    from section_policy import active_ids
+    eligible = active_ids(list(slices_cfg), bundle_root, bundle_root)
+    for inactive in set(slices_cfg) - set(eligible):
+        emit_log(f"tissue_cleanup: skip {inactive} — inactive")
+    for slice_id in eligible:
+        spec = slices_cfg[slice_id]
         mask_path = Path(str(spec.get("mask_path", "")).strip())
         if not mask_path.is_file():
             emit_log(f"tissue_cleanup: skip {slice_id} — mask missing")

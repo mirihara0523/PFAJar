@@ -35,6 +35,7 @@ var CATEGORIES = {
 	alignment: {
 		title: "Atlas alignment",
 		tools: [
+			{ label: "Align Sections Order (test)", action: "openSectionOrderViewer" },
 			{ label: "Align Sections", href: "./align.html" },
 			{ label: "Viewer/Editor", href: "./adjust.html" },
 			{ label: "Parcellation (bulk)", href: "./parcellation_wizard.html" },
@@ -43,6 +44,7 @@ var CATEGORIES = {
 	detection: {
 		title: "Cell detection",
 		tools: [
+			{ label: "Cell Detection Viewer", action: "openDetectionViewer" },
 			{ label: "Cell Detection", href: "./detect_wizard.html" },
 			{ label: "Count Brain", href: "./count.html" },
 			{ label: "Collate Counts", href: "./collate.html", secondary: true },
@@ -68,6 +70,15 @@ function appendToolLink(container, tool, legacyContext) {
 	var status = legacyStatusForTool(tool);
 	var wrapper = document.createElement("div");
 	wrapper.className = "text-start w-100";
+	if (tool.action) {
+		var button = document.createElement("button");
+		button.type = "button"; button.className = "btn btn-primary w-100"; button.textContent = tool.label;
+		button.addEventListener("click", async function () {
+			try { await require("electron").ipcRenderer.invoke(tool.action); }
+			catch (error) { alert("Could not open " + tool.label + ": " + error.message); }
+		});
+		wrapper.appendChild(button); container.appendChild(wrapper); return;
+	}
 
 	if (legacyContext && status === "blocked") {
 		var blocked = document.createElement("button");
@@ -180,7 +191,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 				if (tool.group && tool.tools && tool.tools.length) {
 					appendToolGroup(toolLinks, tool, groupIndex, isLegacyContext);
 					groupIndex++;
-				} else if (tool.href) {
+				} else if (tool.href || tool.action) {
 					appendToolLink(toolLinks, tool, isLegacyContext);
 				}
 			}

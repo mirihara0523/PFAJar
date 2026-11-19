@@ -1044,7 +1044,7 @@ function getProcessingSliceIds(bundleRoot, projectData, index, report, options) 
 			});
 		}
 	}
-	return ids;
+	return require("./section_policy").activeIds(ids, bundleRoot);
 }
 
 function scanOutputsForStep(bundleRoot, stepId, sliceIds, roles, activeRuns) {
@@ -1059,13 +1059,15 @@ function scanOutputsForStep(bundleRoot, stepId, sliceIds, roles, activeRuns) {
 function planRun(bundleRoot, stepId, options) {
 	options = options || {};
 	var mode = options.mode || "merge";
-	var sliceIds = options.sliceIds || [];
+	var sliceIds = require("./section_policy").orderedIds(options.sliceIds || [], bundleRoot);
 	var roles = options.roles || {};
 	var activeRuns = options.activeRuns || null;
 	var toProcess = [];
 	var skipped = [];
+	var sectionStates = require("./section_policy").readSettings(bundleRoot);
 	for (var i = 0; i < sliceIds.length; i++) {
 		var sid = sliceIds[i];
+		if (sectionStates[sid] && sectionStates[sid].active === false) { skipped.push({sliceId: sid, reason: "inactive"}); continue; }
 		var exists = outputExistsForSlice(bundleRoot, stepId, sid, roles, activeRuns);
 		if (mode === "overwrite" || !exists) {
 			toProcess.push(sid);

@@ -1,5 +1,5 @@
-import cv2
 import pipeline_io_bootstrap  # noqa: F401
+import cv2
 import pickle
 import os
 import json
@@ -16,6 +16,10 @@ from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 import tifffile as tiff
 import torch
+from detect_prediction_cache import cache_key, cached_prediction
+import detect_perf
+
+_prediction_cache_context = None
 
 from detect_qc import DetectQcCollector, bbox_intensity_p90, cleanup_detect_qc_artifacts, write_run_histograms
 from detect_qc_analysis import filter_objects_by_intensity
@@ -29,6 +33,11 @@ class DetectionResult:
 
 
 def export_bboxes(image, boxes, output_path):
+    with detect_perf.section("output.bbox_png", Path(output_path).name):
+        _export_bboxes(image, boxes, output_path)
+
+
+def _export_bboxes(image, boxes, output_path):
     for box in boxes:
         x1, y1, x2, y2 = [int(b) for b in box]
         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 2)
@@ -68,18 +77,28 @@ def xyxy_to_area(box):
 
 
 def _limit_detect_threads():
-    """Electron path: no extra OS processes from torch/OpenMP (worker sets env too)."""
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    os.environ.setdefault("MKL_NUM_THREADS", "1")
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-    os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+    """Use bounded native threads; retain one inter-op pool for GPU work."""
+    import cpu_runtime
+
+    cpu_runtime.configure_cpu()
+    print(f"LOG: detect_threads={torch.get_num_threads()}", flush=True)
+
+
+def _log_cuda_memory(label):
+    if not torch.cuda.is_available():
+        return
     try:
-        torch.set_num_threads(1)
-        if hasattr(torch, "set_num_interop_threads"):
-            torch.set_num_interop_threads(1)
-    except Exception:
-        pass
-    print("LOG: detect_threads=1", flush=True)
+        allocated = torch.cuda.memory_allocated(0) / (1024 * 1024)
+        reserved = torch.cuda.memory_reserved(0) / (1024 * 1024)
+        peak = torch.cuda.max_memory_allocated(0) / (1024 * 1024)
+        print(
+            f"LOG: detect_cuda_memory label={label} "
+            f"allocated_mib={allocated:.1f} reserved_mib={reserved:.1f} "
+            f"peak_allocated_mib={peak:.1f}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"LOG: detect_cuda_memory_failed label={label} error={exc}", flush=True)
 
 
 def make_tile_progress_printer(label):
@@ -121,7 +140,24 @@ def run_sliced_detection(image, detection_model, tile_size, label):
         f"tile {tile_size})…",
         flush=True,
     )
-    result = _call_get_sliced_prediction(image, detection_model, tile_size, label)
+    compute = lambda: _call_get_sliced_prediction(image, detection_model, tile_size, label)
+    if _prediction_cache_context is not None:
+        context = _prediction_cache_context
+        try:
+            key = cache_key(context["source"], context["model"], {
+                **context["settings"], "label": label, "tile": tile_size,
+            })
+        except OSError:
+            result = compute()
+        else:
+            # Store objects only: SAHI PredictionResult also retains the full image.
+            objects, hit = cached_prediction(context["directory"], key,
+                lambda: compute().object_prediction_list)
+            from types import SimpleNamespace
+            result = SimpleNamespace(object_prediction_list=objects)
+            print(f"LOG: detect_prediction_cache hit={str(hit).lower()} slice={label}", flush=True)
+    else:
+        result = compute()
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     print(f"LOG: perf detect.inference label={label} {elapsed_ms:.1f}ms", flush=True)
     return result
@@ -195,7 +231,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-m", "--model", help="specify model file", default="../models/ancientwizard.pt"
     )
-    parser.add_argument("-s", "--sam", default="~/.belljar/models/sam_vit_b.pth")
+    parser.add_argument("-s", "--sam", default="~/.pfajar/models/sam_vit_b.pth")
     parser.add_argument("-e", "--eccentricity", help="eccentricity threshold", default=0.5)
     parser.add_argument(
         "-n",
@@ -280,26 +316,34 @@ if __name__ == "__main__":
     else:
         device = "cpu"
 
-    if device == "cpu" and not force_cpu:
-        print(
-            f"LOG: detect_device=cpu torch={torch.__version__} "
-            f"cuda_built={torch.backends.cuda.is_built()} "
-            f"cuda_available={torch.cuda.is_available()}",
-            flush=True,
-        )
+    cuda_available = bool(torch.cuda.is_available())
+    cuda_name = ""
+    if cuda_available:
+        try:
+            cuda_name = torch.cuda.get_device_name(0)
+        except Exception:
+            cuda_name = "unknown"
+    print(
+        f"LOG: detect_device={device} torch={torch.__version__} "
+        f"cuda_built={torch.backends.cuda.is_built()} "
+        f"cuda_available={cuda_available} cuda_name={cuda_name or 'n/a'} "
+        f"force_cpu={force_cpu}",
+        flush=True,
+    )
 
     # Pruning
     endings = ["png", "jpg", "jpeg", "tif", "tiff"]
     files = os.listdir(input_dir)
     files = [f for f in files if f.split(".")[-1].lower() in endings]
+    from section_policy import active_files
     files.sort()
+    files = active_files(files, input_dir)
 
     def _image_slice_id(fname: str) -> str:
         stem = Path(fname).stem
         if stem.lower().endswith(".ome"):
             stem = Path(stem).stem
-        dot = stem.find(".")
-        return stem[:dot] if dot >= 0 else stem
+        return stem
 
     allowed = load_slice_list(args.slice_list.strip() or None)
     if allowed is not None:
@@ -318,7 +362,7 @@ if __name__ == "__main__":
         "multichannel": bool(args.multichannel),
         "sam": args.sam,
         "slice_list": args.slice_list.strip() or None,
-        "input_files": sorted(files),
+        "input_files": files,
         "per_slice_qc": bool(args.per_slice_qc),
     }
     with open(output_dir / "run_manifest.json", "w", encoding="utf-8") as mf:
@@ -333,12 +377,13 @@ if __name__ == "__main__":
         print(f"Using intensity minimum {intensity_min}", flush=True)
     print(f"Found {len(files)} images", flush=True)
     
-    detection_model = AutoDetectionModel.from_pretrained(
+    detection_model = detect_perf.call("model_load", model_path, AutoDetectionModel.from_pretrained,
         model_type="yolov8",
         model_path=model_path,
         confidence_threshold=confidence_threshold,
         device=device,
     )
+    _log_cuda_memory("model_loaded")
 
     written = 0
     failed_reads = 0
@@ -346,6 +391,16 @@ if __name__ == "__main__":
     detect_started = time.perf_counter()
     for file_index, file in enumerate(files):
         file_path = os.path.join(input_dir, file)
+        import sahi
+        _prediction_cache_context = {
+            "source": file_path, "model": model_path,
+            "directory": output_dir.parent / ".detection_candidate_cache",
+            "settings": {"confidence": confidence_threshold,
+                         "multichannel": bool(args.multichannel),
+                         "device": device, "torch": torch.__version__,
+                         "sahi": getattr(sahi, "__version__", "unknown"),
+                         "preprocess": "adapthist-0.01-v1", "overlap": 0.1},
+        }
         stripped, ext = file.split(".")[0], file.split(".")[-1]
         slice_id = _image_slice_id(file)
         slice_started = time.perf_counter()
@@ -392,6 +447,8 @@ if __name__ == "__main__":
                     split_channels.append(img[i, :, :])
 
         predictions = []
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats(0)
         if len(split_channels) > 0:
             for i, chan_img in enumerate(split_channels):
                 # Check data type
@@ -401,23 +458,25 @@ if __name__ == "__main__":
                     chan_img = (chan_img * 255).astype(np.uint8)
 
                 # equalize
-                chan_img = equalize_adapthist(chan_img, clip_limit=0.01)
-                chan_img = (chan_img * 255).astype(np.uint8)
+                with detect_perf.section("preprocess.equalize", f"{file}_ch{i + 1}"):
+                    chan_img = equalize_adapthist(chan_img, clip_limit=0.01)
+                    chan_img = (chan_img * 255).astype(np.uint8)
                 gray_for_qc = chan_img.copy()
                 # convert to BGR
-                chan_img = cv2.cvtColor(chan_img, cv2.COLOR_GRAY2BGR)
+                chan_img = detect_perf.call("preprocess.bgr", file, cv2.cvtColor, chan_img, cv2.COLOR_GRAY2BGR)
                 result = run_sliced_detection(
                     chan_img,
                     detection_model,
                     tile_size,
                     f"{file} ch{i + 1}",
                 )
+                _log_cuda_memory(f"{file}_ch{i + 1}_inference")
 
                 print(
                     f"Screening {len(result.object_prediction_list)} detections on {file} ch{i + 1}…",
                     flush=True,
                 )
-                predicted_objects, pre_ecc_ecc, pre_ecc_records = screen_predictions(
+                predicted_objects, pre_ecc_ecc, pre_ecc_records = detect_perf.call("screening", file, screen_predictions,
                     result.object_prediction_list,
                     area_threshold,
                     eccentricity_threshold=eccentricity_threshold,
@@ -425,7 +484,7 @@ if __name__ == "__main__":
                     gray_for_qc=gray_for_qc,
                     sam_model_path=Path(args.sam.strip()).expanduser(),
                 )
-                qc_collector.add_slice_pass(
+                detect_perf.call("qc.collect", file, qc_collector.add_slice_pass,
                     slice_id,
                     result.object_prediction_list,
                     predicted_objects,
@@ -433,7 +492,7 @@ if __name__ == "__main__":
                     pre_ecc_records,
                     gray_for_qc,
                 )
-                predicted_objects, removed_int = filter_objects_by_intensity(
+                predicted_objects, removed_int = detect_perf.call("intensity_filter", file, filter_objects_by_intensity,
                     predicted_objects, gray_for_qc, intensity_min
                 )
                 if intensity_min > 0:
@@ -462,12 +521,13 @@ if __name__ == "__main__":
             elif img.dtype == np.float32 or img.dtype == np.float64:
                 img = (img * 255).astype(np.uint8)
             
-            img = equalize_adapthist(img, clip_limit=0.01)
-            img = (img * 255).astype(np.uint8)
+            with detect_perf.section("preprocess.equalize", file):
+                img = equalize_adapthist(img, clip_limit=0.01)
+                img = (img * 255).astype(np.uint8)
             gray_for_qc = img.copy()
 
             # convert to BGR
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            img = detect_perf.call("preprocess.bgr", file, cv2.cvtColor, img, cv2.COLOR_GRAY2BGR)
 
             result = run_sliced_detection(
                 img,
@@ -475,12 +535,13 @@ if __name__ == "__main__":
                 tile_size,
                 file,
             )
+            _log_cuda_memory(f"{file}_inference")
 
             print(
                 f"Screening {len(result.object_prediction_list)} detections on {file}…",
                 flush=True,
             )
-            predicted_objects, pre_ecc_ecc, pre_ecc_records = screen_predictions(
+            predicted_objects, pre_ecc_ecc, pre_ecc_records = detect_perf.call("screening", file, screen_predictions,
                 result.object_prediction_list,
                 area_threshold,
                 image=img,
@@ -488,7 +549,7 @@ if __name__ == "__main__":
                 sam_model_path=Path(args.sam.strip()).expanduser(),
                 eccentricity_threshold=eccentricity_threshold,
             )
-            qc_collector.add_slice_pass(
+            detect_perf.call("qc.collect", file, qc_collector.add_slice_pass,
                 slice_id,
                 result.object_prediction_list,
                 predicted_objects,
@@ -496,7 +557,7 @@ if __name__ == "__main__":
                 pre_ecc_records,
                 gray_for_qc,
             )
-            predicted_objects, removed_int = filter_objects_by_intensity(
+            predicted_objects, removed_int = detect_perf.call("intensity_filter", file, filter_objects_by_intensity,
                 predicted_objects, gray_for_qc, intensity_min
             )
             if intensity_min > 0:
@@ -523,8 +584,9 @@ if __name__ == "__main__":
         if args.qc_only:
             written += 1
         else:
-            with open(output_dir / f"Predictions_{stripped}.pkl", "wb") as f:
-                pickle.dump(predictions, f)
+            with detect_perf.section("output.predictions_pkl", file):
+                with open(output_dir / f"Predictions_{stripped}.pkl", "wb") as f:
+                    pickle.dump(predictions, f)
             written += 1
         print(
             f"SLICE_DONE:{file_index + 1}/{n_files}:{file}",
@@ -536,7 +598,7 @@ if __name__ == "__main__":
             flush=True,
         )
 
-    qc_result = write_run_histograms(
+    qc_result = detect_perf.call("qc.write_histograms", "run", write_run_histograms,
         qc_collector,
         output_dir,
         qc_thresholds,

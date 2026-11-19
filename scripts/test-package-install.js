@@ -1,6 +1,6 @@
 "use strict";
 const assert=require("assert"), {EventEmitter}=require("events"), {PassThrough}=require("stream");
-const {installRequirements}=require("../js/package_install");
+const {installRequirements,packageActivity}=require("../js/package_install");
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function fixture(noCache=false){
 	const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();
@@ -11,6 +11,16 @@ function fixture(noCache=false){
 	return {child,events,logs,calls,promise};
 }
 async function main(){
+	assert.strictEqual(packageActivity("Requirement already satisfied: numpy in C:\\Users\\private\\site-packages (2.0)"), "Checking installed packages: numpy");
+	assert.strictEqual(packageActivity("WARNING: diagnostic detail"), null);
+	assert.strictEqual(packageActivity("Downloading https://example.invalid/long-path.whl"), "Downloading required packages…");
+	const installed=fixture();
+	installed.child.stdout.write("Requirement already satisfied: numpy in C:\\private\\site-packages\n");
+	installed.child.stderr.write("WARNING: normal diagnostic\n");
+	installed.child.emit("close",0,null);await installed.promise;
+	assert.strictEqual(installed.events.at(-1).state,"complete");
+	assert.strictEqual(installed.events.at(-1).activity,"Checking installed packages: numpy");
+	assert.ok(installed.logs.some(line=>line.includes("C:\\private")),"raw diagnostic retained");
 	const f=fixture();
 	f.child.stdout.write("Collecting torch\nDownloading torch.whl\n");
 	const korean=Buffer.from("설치 중\n");f.child.stderr.write(korean.subarray(0,2));f.child.stderr.write(korean.subarray(2));

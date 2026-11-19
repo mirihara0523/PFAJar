@@ -38,6 +38,8 @@ import {
 } from "./io_fairshare";
 import {
   runPythonJob,
+  acquirePythonMaintenance,
+  getActivePythonJobCount,
   killAllPythonJobs,
   describePythonShellFailure,
   type PythonJobHandle,
@@ -735,22 +737,26 @@ function setupEnvironment(win: typeof BrowserWindow) {
 }
 
 function installPackages(targetWin: typeof BrowserWindow, noCache: boolean): Promise<void> {
+  console.log("Setup: Checking required packages. This is a normal startup check.");
   return packageInstaller.installRequirements({
     pythonPath: path.join(envPythonPath, pyCommand),
     requirementsPath: path.join(appDir, "py/requirements.txt"),
     cwd: envPythonPath, env: pythonShellEnvBase(), noCache,
-    onEvent: (event: unknown) => {
+    onEvent: (event: { state: string }) => {
       if (!targetWin.isDestroyed()) targetWin.webContents.send("packageInstallProgress", event);
+      if (event.state === "complete") console.log("Setup: Required packages are ready.");
+      if (event.state === "failed") console.log("Setup: Package setup failed. See error details.");
     },
-    onLog: (line: string) => console.log("LOG: setup.packages " + line),
+    // Preserve diagnostic output without flooding the user-facing log window.
+    onLog: (line: string) => _logFileWrite("[" + new Date().toISOString() + "] LOG: setup.packages " + line),
   });
 }
 
 // Install the latest dependencies, could have changed after an update
 function updatePythonDependencies(win: typeof BrowserWindow) {
-  win.webContents.send("updateStatus", "Updating packages...");
+  win.webContents.send("updateStatus", "Checking required packages…");
   return installPackages(win, true).then(() => {
-    win.webContents.send("updateStatus", "Update complete!");
+    win.webContents.send("updateStatus", "Required packages are ready.");
     return true;
   });
 }
@@ -3186,6 +3192,24 @@ ipcMain.on("runTissueCleanupApply", function (event: any, data: any[]) {
       });
     }
   });
+});
+
+require(path.join(appDir, "js", "detect_live_host")).registerDetectionViewer({
+  ipcMain, BrowserWindow, dialog, appDir,
+  startJob: startPyJob,
+  acquireMaintenance: acquirePythonMaintenance,
+  openDetectionWizard: async (settings: unknown, viewerJobId: string | null) => {
+    if (!win || win.isDestroyed()) throw new Error("The main PFA Jar window is unavailable.");
+    if (getActivePythonJobCount() > (viewerJobId ? 1 : 0)) throw new Error("Close other analysis windows or wait for running jobs before opening Cell Detection.");
+    await win.loadFile(path.join(appDir, "pages", "detect_wizard.html"), {
+      query: { viewerSettings: JSON.stringify(settings) },
+    });
+    if (win.isMinimized()) win.restore();
+    win.show(); win.focus();
+  },
+  focusMain: () => {
+    if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+  },
 });
 
 // Cell Detection

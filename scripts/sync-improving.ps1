@@ -46,7 +46,7 @@ if ($UpdateVersion) {
 $plan = @()
 foreach ($file in ($Files | Sort-Object -Unique)) {
     $rel = $file.Replace('/', '\')
-    if (($rel -notmatch '^(?:main|update_manager)\.js$|^(?:py|js|pages|css)\\[^:]+\.(?:py|js|html|css)$' -and !($UpdateVersion -and $rel -eq 'package.json')) -or $rel -match '(^|\\)\.\.(\\|$)') {
+    if (($rel -notmatch '^(?:main|update_manager|python_job|batch_queue)\.js$|^(?:py|js|pages|css)\\[^:]+\.(?:py|js|html|css)$' -and !($UpdateVersion -and $rel -eq 'package.json')) -or $rel -match '(^|\\)\.\.(\\|$)') {
         throw "Not a supported runtime file: $file. Compile TypeScript first; dependency/assets/deletion changes need a separate build review."
     }
     $src = SafePath $source $rel

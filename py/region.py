@@ -266,6 +266,8 @@ if __name__ == "__main__":
     intensityFiles = sorted(
         f for f in os.listdir(intensityPath) if _is_candidate_intensity_filename(f)
     )
+    from section_policy import active_files
+    intensityFiles = active_files(intensityFiles, intensityPath)
     mode_label = "whole" if is_whole else "hemisphere"
     print(f"LOG: intensity_mode={mode_label}", flush=True)
     if include_layers:

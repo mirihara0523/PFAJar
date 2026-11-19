@@ -134,6 +134,8 @@ def main(argv=None):
         for f in os.listdir(inputDirectory)
         if (Path(inputDirectory) / f).is_file() and f.lower().endswith((".tif", ".tiff"))
     )
+    from section_policy import active_files
+    files = active_files(files, inputDirectory)
     if len(files) == 0:
         print(1, flush=True)
         print("No TIFF files found in input directory", flush=True)

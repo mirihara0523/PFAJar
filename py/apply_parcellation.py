@@ -213,15 +213,16 @@ def restore_slice_from_backup(
 
 
 def discover_slice_ids(annotation_dir: Path, slice_ids: list[str] | None) -> list[str]:
-    if slice_ids:
-        return [str(s) for s in slice_ids]
+    from section_policy import active_ids
+    if slice_ids is not None:
+        return active_ids([str(s) for s in slice_ids], annotation_dir)
     out: list[str] = []
     for name in os.listdir(annotation_dir):
         if ANNOTATION_PKL_RE.match(name):
             stem = slice_stem_from_annotation_pkl(name)
             if stem:
                 out.append(stem)
-    return sorted(set(out))
+    return active_ids(sorted(set(out)), annotation_dir)
 
 
 def apply_parcellation_batch(

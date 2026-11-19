@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
+  <title>Cell Detection Viewer — PFA Jar</title>
+  <link rel="stylesheet" href="../css/detect_live.css">
+</head>
+<body>
+  <header>
+    <strong>Cell Detection Viewer</strong>
+    <button id="previous">Previous</button><select id="slice" aria-label="Slice" disabled><option>No sections loaded</option></select><button id="next">Next</button>
+    <button id="goTo" type="button">Go to…</button>
+    <button id="fit">Fit</button><label><input id="boxes" type="checkbox" checked> BBoxes</label>
+    <button id="original" type="button" aria-pressed="false" title="Show the original input image before detection contrast adjustment (CLAHE)" disabled>Original image</button>
+    <span id="count" aria-live="polite">Load an image to begin</span>
+  </header>
+  <main>
+    <div id="viewport"><canvas id="imageCanvas"></canvas><div id="bboxInfo" role="tooltip" hidden></div></div>
+    <div id="optionsSplitter" role="separator" aria-label="Resize options panel" aria-orientation="vertical" tabindex="0"></div>
+    <aside>
+      <section id="workProgress" class="operation-progress" role="status" hidden>
+        <strong id="workStage"></strong>
+        <progress id="workBar" aria-label="Current processing stage"></progress>
+        <div id="workTiming"></div>
+        <div id="workResponse"></div>
+      </section>
+      <details id="detectionSetup" open>
+      <summary>Detection settings</summary>
+      <section id="liveDatasetSection" hidden>
+        <label for="liveSignalBranch">Signal branch</label><select id="liveSignalBranch"></select>
+        <label for="liveDataset">Dataset</label><select id="liveDataset"></select>
+      </section>
+      <label for="input">Input folder</label><div class="path"><input id="input"><button id="browseInput">Browse</button></div>
+      <button id="loadFolder">Load folder</button>
+      <label for="output">Predictions output folder</label><div class="path"><input id="output"><button id="browseOutput">Browse</button></div>
+      <label for="method">Model</label><select id="method"><option value="somata">Somata</option><option value="nuclei">Nuclei</option><option value="custom">Custom .pt</option></select>
+      <div class="path"><input id="model" placeholder="Custom model path"><button id="browseModel">Browse</button></div>
+      <label for="tile">Tile size</label><input id="tile" type="number" min="64" max="4096" step="64" value="640">
+      <label for="floor">Candidate confidence floor</label><input id="floor" type="number" min="0.01" max="1" step="0.01" value="0.10" title="Collect candidates at this confidence. Lowering this floor requires another detection run.">
+      <button id="detect" class="primary">Detect current slice</button>
+      </details>
+      <hr>
+      <fieldset id="filters" disabled>
+        <legend>Live filters</legend>
+        <label for="confidence">Confidence</label><input id="confidence" type="number" min="0.1" max="1" step="0.05" value="0.50">
+        <label for="area">Minimum BBox area (px²)</label><input id="area" type="number" min="0" step="10" value="200">
+        <label for="eccentricity">Minimum eccentricity</label><input id="eccentricity" type="number" min="0" max="1" step="0.05" value="0.20" title="Keep measured eccentricity above this value. Larger values reject more round candidates.">
+        <label for="intensity">Intensity cutoff (BBox p90)</label><input id="intensity" type="number" min="0" max="255" step="5" value="0" title="Minimum 90th-percentile brightness inside the BBox after CLAHE. Zero disables intensity filtering.">
+        <button id="save" class="primary">Save current slice</button>
+        <button id="useInDetection" type="button">Use settings in Cell Detection…</button>
+        <button id="applyAll" type="button">Apply current settings to all slices…</button>
+      </fieldset>
+      <button id="stopAll" type="button" hidden>Stop after current slice</button>
+      <p id="status" role="status">Select a signal dataset folder. Scroll to zoom; drag to pan.</p>
+      <details><summary>Processing details</summary><pre id="log"></pre></details>
+    </aside>
+  </main>
+  <dialog id="goToDialog">
+    <form id="goToForm">
+      <label for="sectionNumber">Go to section</label>
+      <input id="sectionNumber" type="number" min="1" step="1" required>
+      <span id="sectionRange"></span>
+      <div><button type="submit">Go to</button> <button id="cancelGoTo" type="button">Cancel</button></div>
+    </form>
+  </dialog>
+  <dialog id="unsavedDialog">
+    <strong>Unsaved detection changes</strong>
+    <p id="unsavedMessage"></p>
+    <div><button id="unsavedSave" type="button">Save</button> <button id="unsavedDiscard" type="button">Discard</button> <button id="unsavedCancel" type="button">Cancel</button></div>
+  </dialog>
+  <script src="../js/run.js" data-entry="detect_live.js"></script>
+</body>
+</html>

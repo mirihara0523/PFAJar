@@ -94,7 +94,8 @@ def _list_image_files_any(dir_path: Path) -> list[Path]:
         if p.is_file() and p.suffix.lower() in (".png", ".tif", ".tiff", ".jpg", ".jpeg")
     ]
     files.sort(key=lambda p: _natsort_key(p.name))
-    return files
+    from section_policy import active_files
+    return active_files(files, dir_path)
 
 
 def _slice_stem(path: Path) -> str:
@@ -1030,6 +1031,8 @@ def load_seam_grid(meta_dir: "Path | None", slice_id: str, image_path: "Path | N
                         event = json.loads(line)
                         if (event.get('kind') == 'file' and event.get('ok') is True
                                 and str(event.get('file','')).replace('\\', '/').lower() == relative):
+                            if event.get('reset') is True:
+                                ops = []
                             ops.extend(event.get('ops') or [])
             if ops:
                 grid = _orient_seam_grid(grid, ops)

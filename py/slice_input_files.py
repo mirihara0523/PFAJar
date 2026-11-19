@@ -55,8 +55,8 @@ def list_input_files(input_path: Path, slice_list: str | None) -> list[Path]:
             p = resolve_stem_to_file(input_path, stem)
             if p is not None:
                 files.append(p)
-        return sorted(files, key=lambda p: p.name)
+        return __import__("section_policy").active_files(sorted(files, key=lambda p: p.name), input_path)
 
     files = [p for p in input_path.iterdir() if p.is_file() and _is_tiff_name(p.name)]
     files.sort(key=lambda p: p.name)
-    return files
+    return __import__("section_policy").active_files(files, input_path)

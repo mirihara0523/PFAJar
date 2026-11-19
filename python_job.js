@@ -32,7 +32,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.killAllPythonJobs = exports.runPythonJob = exports.describePythonShellFailure = exports.getActivePythonJobCount = exports.appendPythonJobLog = exports.FORCE_SHELL_SCRIPTS = exports.WORKER_ALLOWLIST = void 0;
+exports.killAllPythonJobs = exports.runPythonJob = exports.acquirePythonMaintenance = exports.describePythonShellFailure = exports.getActivePythonJobCount = exports.appendPythonJobLog = exports.FORCE_SHELL_SCRIPTS = exports.WORKER_ALLOWLIST = void 0;
 /**
  * Central supervisor for Electron-spawned Python children.
  * Always finalizes on close/error (not only on "Done!"), logs jobs to
@@ -652,7 +652,19 @@ function makeHandle(record, homeDir) {
  * Callers may attach additional listeners only via onMessage/onStderr options,
  * or use handle.pyshell when via==="shell" (e.g. pyshell.send).
  */
+let maintenanceOwner = null;
+function acquirePythonMaintenance(owner) {
+    if (maintenanceOwner || !activeJobs.has(owner) || activeJobs.size !== 1) {
+        throw new Error("Close other analysis windows and wait for running jobs before changing section orientation.");
+    }
+    maintenanceOwner = owner;
+    return () => { if (maintenanceOwner === owner)
+        maintenanceOwner = null; };
+}
+exports.acquirePythonMaintenance = acquirePythonMaintenance;
 function runPythonJob(opts) {
+    if (maintenanceOwner)
+        throw new Error("A section orientation change is running. Wait for it to finish before starting analysis.");
     if (useWorkerFor(opts.script, opts.forceShell)) {
         return runViaWorker(opts);
     }

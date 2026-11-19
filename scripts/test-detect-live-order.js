@@ -1,0 +1,22 @@
+"use strict";
+const assert = require("assert");
+const fs = require("fs"), path = require("path");
+const { sliceId, sortSections } = require("../js/detect_live_order");
+const files = ["s10.tif", "s2.tif", "s1.tif", "dotted.name.ome.tif"];
+assert.strictEqual(sliceId("dotted.name.ome.tif"), "dotted.name");
+assert.deepStrictEqual(sortSections(files, "filename", {}, []), ["dotted.name.ome.tif", "s1.tif", "s2.tif", "s10.tif"]);
+const positions = { s1: 200, s2: 0, s10: 100, "dotted.name": null };
+assert.deepStrictEqual(sortSections(files, "ap_ascending", positions, []), ["s2.tif", "s10.tif", "s1.tif", "dotted.name.ome.tif"]);
+assert.deepStrictEqual(sortSections(files, "ap_descending", positions, []), ["s1.tif", "s10.tif", "s2.tif", "dotted.name.ome.tif"]);
+assert.deepStrictEqual(sortSections(files, "custom", {}, ["s10", "hidden", "s1"]), ["s10.tif", "s1.tif", "dotted.name.ome.tif", "s2.tif"]);
+assert.strictEqual(files[0], "s10.tif", "sorting must not mutate input");
+const menu = fs.readFileSync(path.join(__dirname, "../js/menu_category.js"), "utf8");
+const alignment = menu.slice(menu.indexOf("alignment:"), menu.indexOf("detection:"));
+assert.ok(alignment.indexOf('label: "Align Sections Order (test)"') < alignment.indexOf('label: "Align Sections"'));
+assert.ok(alignment.includes('action: "openSectionOrderViewer"'));
+console.log("Section order: natural filenames, AP including zero/missing values, custom subsets and dotted IDs passed.");
+
+const detection = menu.slice(menu.indexOf("detection:"), menu.indexOf("exports:"));
+assert.ok(detection.indexOf('label: "Cell Detection Viewer"') < detection.indexOf('label: "Cell Detection",'));
+assert.ok(detection.includes('action: "openDetectionViewer"'));
+assert.ok(!fs.readFileSync(path.join(__dirname,"../pages/menu_category.html"),"utf8").includes('id="openDetectionViewer"'),"no duplicate footer viewer button");

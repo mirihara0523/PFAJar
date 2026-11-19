@@ -843,8 +843,12 @@ function init() {
 		state.currentIndex = draft.current_index || 0;
 		state.slices = draft.slices || state.slices;
 	}
+    // Draft navigation must never restore an inactive/missing section or an old order.
+    var previouslySelected = state.sliceIds[state.currentIndex];
+    state.sliceIds = listSliceIds();
+    state.currentIndex = Math.max(0, state.sliceIds.indexOf(previouslySelected));
 	if (!state.sliceIds.length) {
-		alert("No DAPI PNG sections found under 00_dapi.");
+		alert("No active DAPI PNG sections found under 00_dapi.");
 	}
 	updateSliceUi();
 	loadCurrentSlice().catch(console.error);
